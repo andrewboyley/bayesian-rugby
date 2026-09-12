@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Testing
+/coverage/
+
+# Production builds
+/build
+/dist
+/.svelte-kit/package/
+
+# Misc
+.DS_Thumb
+.env
+.env.*
+npm-debug.log*
+
+# Opencode artifacts
+.agent/
+.agent/**
+.opencode/
+.opencode/**
+.cocoindex_code/
+.cocoindex_code/**
+.codegraph/
+.codegraph/**
+.svelte-kit/
+.svelte-kit/
+
+# Logs
+*.log
+dev-server.log
+dev-server.pid
+
+# Rollback directories
+rollback-*/
+rollback-*/**
+
+# Package files
+package-lock.json
