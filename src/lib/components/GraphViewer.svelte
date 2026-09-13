@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import GraphViewerControls from '#lib/components/GraphViewerControls.svelte';
-	import { ForceAtlas2Layout } from '#lib/graph/force-atlas2-layout.ts';
+	import { defaultForceAtlas2Settings, ForceAtlas2Layout, type ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
 	import { createGraphModel } from '#lib/graph/graph-model.ts';
 	import { GraphProjection } from '#lib/graph/graph-projection.ts';
 
@@ -56,14 +56,21 @@
 	let loaded = $state(false);
 	let nodeCount = $state(0);
 	let edgeCount = $state(0);
-	let revealing = $state(false);
-	let revealByScore = $state<(() => void) | undefined>(undefined);
+	let hasMoreNodes = $state(false);
+	let addNode = $state<(() => void) | undefined>(undefined);
+	let repeatingNodes = $state(false);
+	let nodesPerSecond = $state(2);
+	let toggleRepeatingNodes = $state<(() => void) | undefined>(undefined);
+	let setNodesPerSecond = $state<((value: number) => void) | undefined>(undefined);
+	let fa2Settings = $state<ForceAtlas2Settings>(defaultForceAtlas2Settings);
+	let updateFa2Settings = $state<(<Key extends keyof ForceAtlas2Settings>(key: Key, value: ForceAtlas2Settings[Key]) => void)>(() => {});
 	let statusShort = $derived(status === 'ready' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading');
 
 	let destroyRenderer: (() => void) | undefined;
 	let centerView = $state<(() => void) | undefined>(undefined);
 	let primaryNode = $state<string | null>(null);
 	let secondaryNode = $state<string | null>(null);
+	let controlsOpen = $state(true);
 
 	onMount(async () => {
 		if (!container) return;
@@ -113,15 +120,18 @@
 		);
 
 		const model = createGraphModel(dataset);
-		const allNodeIndices = Array.from({ length: model.nodes.length }, (_value, index) => index);
 		const graph = new Graph();
 		const projection = new GraphProjection(graph, model);
-		projection.applyDelta({ activate: allNodeIndices });
+		if (
+			searchParameters.get('test') === 'selection' ||
+			searchParameters.get('test') === 'projection'
+		) {
+			projection.applyDelta({ activate: Array.from({ length: model.nodes.length }, (_value, index) => index) });
+		}
 
 		const renderer = new Sigma(graph, graphContainer, {
 			settings: {
-				minCameraRatio: 0.05,
-				maxCameraRatio: 2,
+				autoRescale: true,
 				nodeLabelEvents: "extend",
 				antialiasEdges,
 				enableEdgeEvents,
@@ -164,7 +174,7 @@
 						color: {
 							attribute: 'color',
 						},
-						size: { attribute: 'displayScore', min: 10, max: 50, minValue: minScore, maxValue: maxScore },
+						size: { attribute: 'displayScore', min: 3, max: 10, minValue: minScore, maxValue: maxScore },
 						label: { attribute: 'label' },
 						labelColor: '#fdfcfc',
 						labelFont: 'Berkeley Mono, JetBrains Mono, IBM Plex Mono, ui-monospace, monospace',
@@ -271,34 +281,39 @@
 			},
 		});
 		const layout = new ForceAtlas2Layout(graph);
+		updateFa2Settings = (key, value) => {
+			fa2Settings = { ...fa2Settings, [key]: value };
+			layout.setSettings({ [key]: value });
+		};
 		let revealRun = 0;
 		let revealTimer: number | undefined;
+		let addLayoutFrame: number | undefined;
+		let addNodesInterval: ReturnType<typeof setInterval> | undefined;
 		let revealTrace: { phase: string; ms: number }[] = [];
 		const popFrames: number[] = [];
+		let nextNodeOffset = 0;
 
 		let focusedNode: string | null = null;
 
 		function focusPrimaryNeighborhood(node: string) {
 			focusedNode = node;
 			const nodes = [node, ...graph.neighbors(node)];
-			const normalize = renderer.getNormalizationFunction();
 			const coordinates = nodes.map((key) => {
 				const { x, y } = graph.getNodeAttributes(key);
-				return normalize({ x: x as number, y: y as number });
+				return renderer.getNormalizationFunction()({ x: x as number, y: y as number });
 			});
 			const neighborhoodMinX = Math.min(...coordinates.map(({ x }) => x));
 			const neighborhoodMaxX = Math.max(...coordinates.map(({ x }) => x));
 			const neighborhoodMinY = Math.min(...coordinates.map(({ y }) => y));
 			const neighborhoodMaxY = Math.max(...coordinates.map(({ y }) => y));
-			const width = Math.max(neighborhoodMaxX - neighborhoodMinX, 0.05);
-			const height = Math.max(neighborhoodMaxY - neighborhoodMinY, 0.05);
-			const padding = 1.3;
+			const width = neighborhoodMaxX - neighborhoodMinX;
+			const height = neighborhoodMaxY - neighborhoodMinY;
 
 			void renderer.getCamera().animate(
 				{
 					x: (neighborhoodMinX + neighborhoodMaxX) / 2,
 					y: (neighborhoodMinY + neighborhoodMaxY) / 2,
-					ratio: Math.min(2, Math.max(0.1, Math.max(width, height) * padding)),
+					ratio: Math.max(width, height, 0.05) * 2,
 				},
 				{ duration: 600 }
 			);
@@ -401,6 +416,52 @@
 			popFrames.push(initialFrame);
 		}
 
+		function addNextNodeByDegree() {
+			const index = model.nodesByDescendingDegree[nextNodeOffset];
+			if (index === undefined) return;
+			renderer.setSetting('autoRescale', projection.visibleCount() !== 0);
+			projection.applyDelta({ activate: [index] }, 1, true);
+			projection.rescaleVisibleDegrees(minScore, maxScore);
+			if (projection.visibleCount() === 1) {
+				void renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 2 }, { duration: 0 });
+			}
+			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
+			addLayoutFrame = requestAnimationFrame(() => {
+				const angle = index * 2.399963229728653;
+				projection.setPosition(index, Math.cos(angle) * 0.001, Math.sin(angle) * 0.001);
+				layout.restart();
+			});
+			nextNodeOffset += 1;
+			nodeCount = projection.visibleCount();
+			edgeCount = graph.size;
+			hasMoreNodes = nextNodeOffset < model.nodesByDescendingDegree.length;
+			if (!hasMoreNodes && addNodesInterval !== undefined) {
+				clearInterval(addNodesInterval);
+				addNodesInterval = undefined;
+				repeatingNodes = false;
+			}
+		}
+
+		function stopRepeatingNodes() {
+			if (addNodesInterval !== undefined) clearInterval(addNodesInterval);
+			addNodesInterval = undefined;
+			repeatingNodes = false;
+		}
+
+		function startRepeatingNodes() {
+			if (!hasMoreNodes) return;
+			addNextNodeByDegree();
+			addNodesInterval = setInterval(addNextNodeByDegree, 1000 / nodesPerSecond);
+			repeatingNodes = true;
+		}
+
+		function updateNodesPerSecond(value: number) {
+			nodesPerSecond = value;
+			if (!repeatingNodes) return;
+			if (addNodesInterval !== undefined) clearInterval(addNodesInterval);
+			addNodesInterval = setInterval(addNextNodeByDegree, 1000 / nodesPerSecond);
+		}
+
 		function revealNodesByScore() {
 			const run = ++revealRun;
 			let phaseStart = performance.now();
@@ -417,7 +478,6 @@
 			markPhase('layoutReset');
 			nodeCount = 0;
 			edgeCount = 0;
-			revealing = true;
 			renderer.refresh();
 
 			let offset = 0;
@@ -426,7 +486,6 @@
 				if (run !== revealRun) return;
 				const batch = Array.from(model.nodesByDescendingScore.slice(offset, offset + 32)) as number[];
 				if (!batch.length) {
-					revealing = false;
 					renderer.refresh();
 					return;
 				}
@@ -522,16 +581,21 @@
 				lastTrace: () => revealTrace,
 			};
 		}
-		revealByScore = revealNodesByScore;
+		addNode = addNextNodeByDegree;
+		toggleRepeatingNodes = () => (repeatingNodes ? stopRepeatingNodes() : startRepeatingNodes());
+		setNodesPerSecond = updateNodesPerSecond;
 		centerView = () => {
 			void renderer.getCamera().reset({ duration: 600 });
 		};
-		destroyRenderer = () => {
-			centerView = undefined;
-			revealByScore = undefined;
-			revealing = false;
-			revealRun += 1;
+			destroyRenderer = () => {
+				centerView = undefined;
+				addNode = undefined;
+				toggleRepeatingNodes = undefined;
+				setNodesPerSecond = undefined;
+				stopRepeatingNodes();
+				revealRun += 1;
 			if (revealTimer !== undefined) window.clearTimeout(revealTimer);
+			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
 			for (const frame of popFrames) cancelAnimationFrame(frame);
 			layout.destroy();
 			delete performanceWindow.rugbyGraphSelectionTest;
@@ -539,8 +603,7 @@
 			renderer.kill();
 		};
 
-		nodeCount = graph.order;
-		edgeCount = graph.size;
+		hasMoreNodes = model.nodesByDescendingDegree.length > 0;
 		loaded = true;
 		status = 'ready';
 		performance.mark('rugby-graph:graph-ready');
@@ -549,8 +612,20 @@
 	onDestroy(() => destroyRenderer?.());
 </script>
 
-<section id="graph-viewer" tabindex="-1" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-hairline-strong bg-canvas" aria-label="Graph viewer">
-	<header class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-sm border-b border-hairline px-sm py-xs sm:gap-md sm:px-md">
+<div class="flex min-h-0 flex-1 flex-col gap-sm">
+	<section class="shrink-0 rounded-sm border border-hairline-strong bg-canvas px-sm sm:px-md" aria-label="Graph controls">
+		<details bind:open={controlsOpen}>
+			<summary class="flex h-9 cursor-pointer list-none items-center justify-between text-caption text-mute [&::-webkit-details-marker]:hidden">
+				<span>[ graph controls ]</span>
+				<span>{controlsOpen ? '[ collapse ]' : '[ expand ]'}</span>
+			</summary>
+			<div class="pb-sm">
+				<GraphViewerControls {loaded} {hasMoreNodes} onAddNode={addNode} repeating={repeatingNodes} {nodesPerSecond} onToggleRepeating={toggleRepeatingNodes} onNodesPerSecondChange={setNodesPerSecond} settings={fa2Settings} onSettingsChange={updateFa2Settings} />
+			</div>
+		</details>
+	</section>
+	<section id="graph-viewer" tabindex="-1" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-hairline-strong bg-canvas" aria-label="Graph viewer">
+	<header class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-sm border-b border-hairline px-sm py-xs sm:gap-md sm:px-md">
 		<span class="whitespace-nowrap text-label-md font-medium">[ graph ]</span>
 		<span class="min-w-0 whitespace-nowrap text-caption text-mute" aria-live="polite">
 			{#if statusShort === status}
@@ -559,7 +634,6 @@
 				<span class="sm:hidden">{statusShort}</span><span class="hidden sm:inline">{status}</span>
 			{/if}
 		</span>
-		<GraphViewerControls {loaded} {revealing} onReveal={revealByScore} onCenter={centerView} />
 	</header>
 	<div class="relative flex min-h-0 flex-1">
 		<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>
@@ -574,4 +648,5 @@
 	<footer class="flex items-center gap-lg border-t border-hairline px-sm py-xs text-caption sm:px-md">
 		<span class="font-normal tabular-nums text-mute">nodes {nodeCount} · edges {edgeCount}</span>
 	</footer>
-</section>
+	</section>
+</div>

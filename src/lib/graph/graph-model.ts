@@ -21,6 +21,7 @@ export interface GraphModel {
 	edgeTargets: Uint32Array;
 	incidentEdges: Uint32Array[];
 	nodesByDescendingScore: Uint32Array;
+	nodesByDescendingDegree: Uint32Array;
 }
 
 export function createGraphModel(dataset: GraphDataset): GraphModel {
@@ -65,5 +66,8 @@ export function createGraphModel(dataset: GraphDataset): GraphModel {
 		edgeTargets: Uint32Array.from(edgeTargets),
 		incidentEdges: incidentEdges.map((edges) => Uint32Array.from(edges)),
 		nodesByDescendingScore: Uint32Array.from(nodes.map((_node, index) => index).sort((left, right) => nodes[right].score - nodes[left].score)),
+		nodesByDescendingDegree: Uint32Array.from(
+			nodes.map((_node, index) => index).sort((left, right) => incidentEdges[right].length - incidentEdges[left].length)
+		),
 	};
 }

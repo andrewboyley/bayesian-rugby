@@ -94,7 +94,7 @@ test('OpenSpec graph-projection: reveal button populates in size order without a
 	expect(source).not.toContain('for (const node of dataset.nodes)');
 });
 
-test('OpenSpec graph-projection: reveal is driven by explicit edge deltas and native FA2', async () => {
+	test('OpenSpec graph-projection: reveal is driven by explicit edge deltas and native FA2', async () => {
 	const projection = await readFile(new URL('../../src/lib/graph/graph-projection.ts', import.meta.url), 'utf8');
 	const layout = await readFile(new URL('../../src/lib/graph/force-atlas2-layout.ts', import.meta.url), 'utf8');
 
@@ -103,5 +103,36 @@ test('OpenSpec graph-projection: reveal is driven by explicit edge deltas and na
 	expect(projection).toContain('updateEachNodeAttributes');
 	expect(projection).toContain('visible');
 	expect(layout).toContain("graphology-layout-forceatlas2/worker");
-	expect(layout).toContain('barnesHutOptimize');
+		expect(layout).toContain('barnesHutOptimize');
+	});
+
+test('OpenSpec graph-projection: incremental nodes scale from visible connections', async () => {
+		const projection = await readFile(new URL('../../src/lib/graph/graph-projection.ts', import.meta.url), 'utf8');
+		const viewer = await readFile(new URL('../../src/lib/components/GraphViewer.svelte', import.meta.url), 'utf8');
+
+		expect(projection).toContain('rescaleVisibleDegrees');
+	expect(projection).toContain('visibleDegree');
+	expect(projection).toContain('degreeForMaximumSize');
+	expect(projection).toContain("'size'");
+	expect(viewer).toContain('projection.rescaleVisibleDegrees(minScore, maxScore)');
+});
+
+test('OpenSpec graph-projection: automatic addition is rate-limited and cleaned up', async () => {
+	const viewer = await readFile(new URL('../../src/lib/components/GraphViewer.svelte', import.meta.url), 'utf8');
+	const controls = await readFile(new URL('../../src/lib/components/GraphViewerControls.svelte', import.meta.url), 'utf8');
+
+	expect(viewer).toContain('setInterval(addNextNodeByDegree, 1000 / nodesPerSecond)');
+	expect(viewer).toContain('stopRepeatingNodes();');
+	expect(controls).toContain('[ auto add ]');
+	expect(controls).toContain('Nodes added per second');
+});
+
+test('OpenSpec graph-projection: ForceAtlas2 starts collapsed and the first node has a stable camera scale', async () => {
+	const viewer = await readFile(new URL('../../src/lib/components/GraphViewer.svelte', import.meta.url), 'utf8');
+	const controls = await readFile(new URL('../../src/lib/components/GraphViewerControls.svelte', import.meta.url), 'utf8');
+
+	expect(controls).toContain('let forceAtlasOpen = $state(false)');
+	expect(viewer).toContain('projection.visibleCount() === 1');
+	expect(viewer).toContain('ratio: 2');
+	expect(viewer).toContain("renderer.setSetting('autoRescale', projection.visibleCount() !== 0)");
 });

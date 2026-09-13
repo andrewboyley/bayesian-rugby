@@ -29,7 +29,7 @@ export class GraphProjection {
 		this.visible.fill(0);
 	}
 
-	applyDelta(delta: ProjectionDelta, startScale = 1) {
+	applyDelta(delta: ProjectionDelta, startScale = 1, startAtOrigin = false) {
 		const changedNodes: string[] = [];
 		const changedEdges: string[] = [];
 
@@ -47,12 +47,13 @@ export class GraphProjection {
 			const node = this.model.nodes[index];
 			this.graph.addNode(node.key, {
 				label: node.label,
-				x: node.x,
-				y: node.y,
+				x: startAtOrigin ? 0 : node.x,
+				y: startAtOrigin ? 0 : node.y,
 				cluster: node.cluster,
 				color: node.color,
 				score: node.score,
 				displayScore: node.score * startScale,
+				size: 0.05,
 			});
 			changedNodes.push(node.key);
 
@@ -81,6 +82,29 @@ export class GraphProjection {
 			const node = this.model.nodes[index];
 			this.graph.setNodeAttribute(node.key, 'displayScore', node.score * scale);
 		}
+	}
+
+	rescaleVisibleDegrees(minimum: number, maximum: number) {
+		const degreeForMaximumSize = 5;
+		for (let index = 0; index < this.model.nodes.length; index += 1) {
+			if (!this.visible[index]) continue;
+			const node = this.model.nodes[index];
+			const visibleDegree = this.model.incidentEdges[index].reduce((count, edgeIndex) => {
+				const neighbor = this.model.edgeSources[edgeIndex] === index ? this.model.edgeTargets[edgeIndex] : this.model.edgeSources[edgeIndex];
+				return count + this.visible[neighbor];
+			}, 0);
+			const scale = Math.min(visibleDegree / degreeForMaximumSize, 1);
+			const displayScore = minimum + scale * (maximum - minimum);
+			this.graph.setNodeAttribute(node.key, 'displayScore', displayScore);
+			this.graph.setNodeAttribute(node.key, 'size', 0.05 + scale * 0.15);
+		}
+	}
+
+	setPosition(index: number, x: number, y: number) {
+		if (!this.visible[index]) return;
+		const key = this.model.nodes[index].key;
+		this.graph.setNodeAttribute(key, 'x', x);
+		this.graph.setNodeAttribute(key, 'y', y);
 	}
 
 	applyPositions(positions: Float32Array) {
