@@ -60,7 +60,13 @@ Run `just verify` before you finish a code change. It runs Svelte and TypeScript
 
 If you change `justfile`, run `just format-check`. If you change `DESIGN.md`, run `pnpm dlx @google/design.md lint DESIGN.md`.
 
-No test framework exists yet. Add focused tests when you add testable behavior.
+Use Playwright for browser behavior and performance tests. Add focused tests when you add testable behavior.
+
+## Performance Audits
+
+Run `just performance` before you finish a graph rendering change. It records whether its headless Chromium runner supports a WebGL GPU timer query.
+
+For a GPU performance conclusion, use Chrome DevTools. Open `/?perf=timers`, then run a WebGL2 elapsed-time query through page script evaluation. Do not compare GPU times between different browsers, GPUs, viewports, or graph states.
 
 ## Delivery Rules
 

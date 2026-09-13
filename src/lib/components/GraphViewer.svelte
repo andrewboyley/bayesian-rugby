@@ -7,6 +7,16 @@
 		clusters: { key: string; color: string; clusterLabel: string }[];
 	}
 
+	interface PerformanceSnapshot {
+		profile: string;
+		antialiasEdges: boolean;
+		edgeOpacity: number;
+		enableEdgeEvents: boolean;
+		pickingDownSizingRatio: number;
+		edgePaths: string[];
+		diagnostics: string[];
+	}
+
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
 	let loaded = $state(false);
@@ -21,6 +31,18 @@
 	onMount(async () => {
 		if (!container) return;
 		const graphContainer = container;
+		const performanceWindow = window as Window & { rugbyGraphPerformance?: PerformanceSnapshot };
+		const searchParameters = new URLSearchParams(window.location.search);
+		const performanceProfile = searchParameters.get('performance') ?? 'baseline';
+		const edgeOpacity = performanceProfile === 'opaque' ? 1 : 0.3;
+		const edgeColor = performanceProfile === 'opaque' ? '#424245' : '#646262';
+		const antialiasEdges = performanceProfile !== 'aliased';
+		const enableEdgeEvents = performanceProfile === 'edge-events';
+		const pickingDownSizingRatio = performanceProfile === 'coarse-picking' ? 4 : 2;
+		const diagnostics = new Set(
+			searchParameters.has('perf') ? (searchParameters.get('perf') || 'timers,stats').split(',') : []
+		);
+		const hasDiagnostic = (name: string) => diagnostics.has('all') || diagnostics.has(name);
 
 		const [{ default: Graph }, { default: Sigma, DEFAULT_STYLES, DEPTHLESS_STYLES }, { layerFill, layerGradient, layerPlain, pathLine }] = await Promise.all([
 			import('graphology'),
@@ -87,6 +109,9 @@
 				minCameraRatio: 0.05,
 				maxCameraRatio: 2,
 				nodeLabelEvents: "extend",
+				antialiasEdges,
+				enableEdgeEvents,
+				pickingDownSizingRatio,
 			},
 			customNodeState: { isActive: false, isPrimary: false, isSecondary: false },
 			customEdgeState: { isActive: false, isPrimaryEdge: false, isSelected: false },
@@ -104,13 +129,13 @@
 				},
 				edges: {
 					variables: {
-						sourceColor: { type: 'color', default: '#646262' },
-						targetColor: { type: 'color', default: '#646262' },
+						sourceColor: { type: 'color', default: edgeColor },
+						targetColor: { type: 'color', default: edgeColor },
 						useGradient: { type: 'boolean', default: false },
 					},
 					paths: [pathLine()],
 					layers: [
-						layerPlain({ color: '#646262' }),
+						layerPlain({ color: edgeColor }),
 						layerGradient({
 							stops: [{ attribute: 'sourceColor' }, { attribute: 'targetColor' }],
 							enabled: { attribute: 'useGradient' },
@@ -211,7 +236,7 @@
 				],
 				edges: [
 					DEPTHLESS_STYLES.edges,
-					{ color: '#646262', opacity: 0.3, size: 1, path: 'line' },
+					{ color: edgeColor, opacity: edgeOpacity, size: 1, path: 'line' },
 					{
 						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasActiveSubgraph: boolean }) => graphState.hasActiveSubgraph && !state.isActive,
 						then: { color: '#424245', opacity: 0.05 },
@@ -341,9 +366,24 @@
 			centerView?.();
 		});
 
-		if (new URLSearchParams(window.location.search).has('perf')) {
+		if (hasDiagnostic('timers')) {
 			renderer.setSetting('DEBUG_gpuTimerQueries', true);
+		}
+		if (hasDiagnostic('stats')) {
 			renderer.setSetting('DEBUG_logRenderStats', true);
+		}
+		if (hasDiagnostic('shaders')) renderer.setSetting('DEBUG_logShaders', true);
+		if (hasDiagnostic('picking')) renderer.setSetting('DEBUG_displayPickingLayer', true);
+		if (searchParameters.has('performance') || searchParameters.has('perf')) {
+			performanceWindow.rugbyGraphPerformance = {
+				profile: performanceProfile,
+				antialiasEdges,
+				edgeOpacity,
+				enableEdgeEvents,
+				pickingDownSizingRatio,
+				edgePaths: ['line'],
+				diagnostics: [...diagnostics],
+			};
 		}
 		centerView = () => {
 			void renderer.getCamera().reset({ duration: 600 });
@@ -357,6 +397,7 @@
 		edgeCount = graph.size;
 		loaded = true;
 		status = 'wikipedia concept network';
+		performance.mark('rugby-graph:graph-ready');
 	});
 
 	onDestroy(() => destroyRenderer?.());

@@ -71,6 +71,11 @@ lint:
 build:
     pnpm run build
 
+# Measure graph startup and frame timing in Chromium.
+[group('quality')]
+performance:
+    pnpm run test:performance
+
 # Run all project quality gates.
 [group('quality')]
 verify: check lint build
