@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import GraphViewerControls from '#lib/components/GraphViewerControls.svelte';
+	import { ForceAtlas2Layout } from '#lib/graph/force-atlas2-layout.ts';
+	import { createGraphModel } from '#lib/graph/graph-model.ts';
+	import { GraphProjection } from '#lib/graph/graph-projection.ts';
 
 	interface Dataset {
 		nodes: { key: string; label: string; tag: string; cluster: string; x: number; y: number; score: number }[];
@@ -24,6 +28,7 @@
 		primaryEdges: string[];
 		selectedEdges: string[];
 		focusedNode: string | null;
+		camera: { x: number; y: number; ratio: number };
 	}
 
 	interface SelectionTestController {
@@ -33,11 +38,27 @@
 		snapshot: () => SelectionSnapshot;
 	}
 
+	interface ProjectionSnapshot {
+		visibleNodes: number;
+		visibleEdges: number;
+		layoutRunning: boolean;
+		layoutActiveNodes: number;
+	}
+
+	interface ProjectionTestController {
+		reveal: () => void;
+		snapshot: () => ProjectionSnapshot;
+		lastTrace: () => { phase: string; ms: number }[];
+	}
+
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
 	let loaded = $state(false);
 	let nodeCount = $state(0);
 	let edgeCount = $state(0);
+	let revealing = $state(false);
+	let revealByScore = $state<(() => void) | undefined>(undefined);
+	let statusShort = $derived(status === 'ready' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading');
 
 	let destroyRenderer: (() => void) | undefined;
 	let centerView = $state<(() => void) | undefined>(undefined);
@@ -50,6 +71,7 @@
 		const performanceWindow = window as Window & {
 			rugbyGraphPerformance?: PerformanceSnapshot;
 			rugbyGraphSelectionTest?: SelectionTestController;
+			rugbyGraphProjectionTest?: ProjectionTestController;
 		};
 		const searchParameters = new URLSearchParams(window.location.search);
 		const performanceProfile = searchParameters.get('performance') ?? 'baseline';
@@ -82,53 +104,22 @@
 			return;
 		}
 
-		const { minScore, maxScore, minX, maxX, minY, maxY } = dataset.nodes.reduce(
-			({ minScore, maxScore, minX, maxX, minY, maxY }, { score, x, y }) => ({
+		const { minScore, maxScore } = dataset.nodes.reduce(
+			({ minScore, maxScore }, { score }) => ({
 				minScore: Math.min(minScore, score),
 				maxScore: Math.max(maxScore, score),
-				minX: Math.min(minX, x),
-				maxX: Math.max(maxX, x),
-				minY: Math.min(minY, y),
-				maxY: Math.max(maxY, y),
 			}),
-			{ minScore: Infinity, maxScore: -Infinity, minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+			{ minScore: Infinity, maxScore: -Infinity }
 		);
 
-		const clusterColors = Object.fromEntries(dataset.clusters.map((cluster) => [cluster.key, cluster.color]));
-		const cameraMargin = Math.max(maxX - minX, maxY - minY) * 0.2;
+		const model = createGraphModel(dataset);
+		const allNodeIndices = Array.from({ length: model.nodes.length }, (_value, index) => index);
 		const graph = new Graph();
-
-		for (const node of dataset.nodes) {
-			graph.addNode(node.key, {
-				label: node.label,
-				x: node.x,
-				y: node.y,
-				cluster: node.cluster,
-				color: clusterColors[node.cluster] ?? '#fdfcfc',
-				score: node.score,
-			});
-		}
-
-		for (const [source, target] of dataset.edges) {
-			if (graph.hasNode(source) && graph.hasNode(target) && !graph.hasEdge(source, target)) {
-				graph.addEdge(source, target, {
-					sourceColor: graph.getNodeAttribute(source, 'color'),
-					targetColor: graph.getNodeAttribute(target, 'color'),
-					useGradient: false,
-				});
-			}
-		}
+		const projection = new GraphProjection(graph, model);
+		projection.applyDelta({ activate: allNodeIndices });
 
 		const renderer = new Sigma(graph, graphContainer, {
 			settings: {
-				// Keep room around every outer edge for nodes and their labels.
-				cameraPanBoundaries: {
-					boundaries: {
-						x: [minX - cameraMargin, maxX + cameraMargin],
-						y: [minY - cameraMargin, maxY + cameraMargin],
-					},
-					tolerance: 0,
-				},
 				minCameraRatio: 0.05,
 				maxCameraRatio: 2,
 				nodeLabelEvents: "extend",
@@ -173,7 +164,7 @@
 						color: {
 							attribute: 'color',
 						},
-						size: { attribute: 'score', min: 10, max: 50, minValue: minScore, maxValue: maxScore },
+						size: { attribute: 'displayScore', min: 10, max: 50, minValue: minScore, maxValue: maxScore },
 						label: { attribute: 'label' },
 						labelColor: '#fdfcfc',
 						labelFont: 'Berkeley Mono, JetBrains Mono, IBM Plex Mono, ui-monospace, monospace',
@@ -279,26 +270,35 @@
 				],
 			},
 		});
+		const layout = new ForceAtlas2Layout(graph);
+		let revealRun = 0;
+		let revealTimer: number | undefined;
+		let revealTrace: { phase: string; ms: number }[] = [];
+		const popFrames: number[] = [];
 
 		let focusedNode: string | null = null;
 
 		function focusPrimaryNeighborhood(node: string) {
 			focusedNode = node;
 			const nodes = [node, ...graph.neighbors(node)];
-			const coordinates = nodes.map((key) => graph.getNodeAttributes(key));
-			const neighborhoodMinX = Math.min(...coordinates.map(({ x }) => x as number));
-			const neighborhoodMaxX = Math.max(...coordinates.map(({ x }) => x as number));
-			const neighborhoodMinY = Math.min(...coordinates.map(({ y }) => y as number));
-			const neighborhoodMaxY = Math.max(...coordinates.map(({ y }) => y as number));
-			const width = Math.max(neighborhoodMaxX - neighborhoodMinX, (maxX - minX) * 0.05);
-			const height = Math.max(neighborhoodMaxY - neighborhoodMinY, (maxY - minY) * 0.05);
+			const normalize = renderer.getNormalizationFunction();
+			const coordinates = nodes.map((key) => {
+				const { x, y } = graph.getNodeAttributes(key);
+				return normalize({ x: x as number, y: y as number });
+			});
+			const neighborhoodMinX = Math.min(...coordinates.map(({ x }) => x));
+			const neighborhoodMaxX = Math.max(...coordinates.map(({ x }) => x));
+			const neighborhoodMinY = Math.min(...coordinates.map(({ y }) => y));
+			const neighborhoodMaxY = Math.max(...coordinates.map(({ y }) => y));
+			const width = Math.max(neighborhoodMaxX - neighborhoodMinX, 0.05);
+			const height = Math.max(neighborhoodMaxY - neighborhoodMinY, 0.05);
 			const padding = 1.3;
 
 			void renderer.getCamera().animate(
 				{
-					x: (neighborhoodMinX + neighborhoodMaxX - minX * 2) / (maxX - minX) / 2,
-					y: (neighborhoodMinY + neighborhoodMaxY - minY * 2) / (maxY - minY) / 2,
-					ratio: Math.min(2, Math.max(0.1, Math.max(width / (maxX - minX), height / (maxY - minY)) * padding)),
+					x: (neighborhoodMinX + neighborhoodMaxX) / 2,
+					y: (neighborhoodMinY + neighborhoodMaxY) / 2,
+					ratio: Math.min(2, Math.max(0.1, Math.max(width, height) * padding)),
 				},
 				{ duration: 600 }
 			);
@@ -377,7 +377,72 @@
 			updateGraphState(null);
 		}
 
+		function projectionSnapshot(): ProjectionSnapshot {
+			const layoutSnapshot = layout.snapshot();
+			return {
+				visibleNodes: projection.visibleCount(),
+				visibleEdges: graph.size,
+				layoutRunning: layoutSnapshot.running,
+				layoutActiveNodes: layoutSnapshot.activeNodes,
+			};
+		}
+
+		function animateNodePop(indices: number[]) {
+			const startedAt = performance.now();
+			const frame = (now: number) => {
+				const progress = Math.min(1, (now - startedAt) / 180);
+				projection.setPopScale(indices, progress * progress * (3 - 2 * progress));
+				if (progress < 1) {
+					const nextFrame = requestAnimationFrame(frame);
+					popFrames.push(nextFrame);
+				}
+			};
+			const initialFrame = requestAnimationFrame(frame);
+			popFrames.push(initialFrame);
+		}
+
+		function revealNodesByScore() {
+			const run = ++revealRun;
+			let phaseStart = performance.now();
+			const markPhase = (label: string) => {
+				revealTrace.push({ phase: label, ms: Math.round(performance.now() - phaseStart) });
+				phaseStart = performance.now();
+			};
+			revealTrace = [];
+			clearSelection();
+			markPhase('clearSelection');
+			graph.clear();
+			projection.resetVisible();
+			markPhase('deactivate');
+			markPhase('layoutReset');
+			nodeCount = 0;
+			edgeCount = 0;
+			revealing = true;
+			renderer.refresh();
+
+			let offset = 0;
+			const firstBatchStart = performance.now();
+			const revealNextBatch = () => {
+				if (run !== revealRun) return;
+				const batch = Array.from(model.nodesByDescendingScore.slice(offset, offset + 32)) as number[];
+				if (!batch.length) {
+					revealing = false;
+					renderer.refresh();
+					return;
+				}
+				projection.applyDelta({ activate: batch }, 0.01);
+				animateNodePop(batch);
+				nodeCount = projection.visibleCount();
+				edgeCount = graph.size;
+				offset += batch.length;
+				if (offset === batch.length) revealTrace.push({ phase: 'firstBatch', ms: Math.round(performance.now() - firstBatchStart) });
+				revealTimer = window.setTimeout(revealNextBatch, 28);
+			};
+			revealNextBatch();
+		}
+
 		function selectionSnapshot(): SelectionSnapshot {
+			const { x, y, ratio } = renderer.getCamera().getState();
 			const activeNodes = primaryNode ? [primaryNode, ...graph.neighbors(primaryNode)] : [];
 			const primaryEdges: string[] = [];
 			const selectedEdges: string[] = [];
@@ -390,7 +455,7 @@
 				}
 			});
 
-			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode };
+			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode, camera: { x, y, ratio } };
 		}
 
 		function selectionCandidates() {
@@ -450,12 +515,27 @@
 				snapshot: selectionSnapshot,
 			};
 		}
+		if (searchParameters.get('test') === 'projection') {
+			performanceWindow.rugbyGraphProjectionTest = {
+				reveal: revealNodesByScore,
+				snapshot: projectionSnapshot,
+				lastTrace: () => revealTrace,
+			};
+		}
+		revealByScore = revealNodesByScore;
 		centerView = () => {
 			void renderer.getCamera().reset({ duration: 600 });
 		};
 		destroyRenderer = () => {
 			centerView = undefined;
+			revealByScore = undefined;
+			revealing = false;
+			revealRun += 1;
+			if (revealTimer !== undefined) window.clearTimeout(revealTimer);
+			for (const frame of popFrames) cancelAnimationFrame(frame);
+			layout.destroy();
 			delete performanceWindow.rugbyGraphSelectionTest;
+			delete performanceWindow.rugbyGraphProjectionTest;
 			renderer.kill();
 		};
 
@@ -473,17 +553,13 @@
 	<header class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-sm border-b border-hairline px-sm py-xs sm:gap-md sm:px-md">
 		<span class="whitespace-nowrap text-label-md font-medium">[ graph ]</span>
 		<span class="min-w-0 whitespace-nowrap text-caption text-mute" aria-live="polite">
-			<span class="sm:hidden">{status === 'wikipedia concept network' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading'}</span>
-			<span class="hidden sm:inline">{status}</span>
+			{#if statusShort === status}
+				{status}
+			{:else}
+				<span class="sm:hidden">{statusShort}</span><span class="hidden sm:inline">{status}</span>
+			{/if}
 		</span>
-		<button
-			type="button"
-			class="inline-flex min-h-9 shrink-0 cursor-pointer items-center whitespace-nowrap border border-hairline-strong px-xs py-0.5 text-caption text-mute transition-colors hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
-			onclick={() => centerView?.()}
-			disabled={!centerView}
-		>
-			[ center view ]
-		</button>
+		<GraphViewerControls {loaded} {revealing} onReveal={revealByScore} onCenter={centerView} />
 	</header>
 	<div class="relative flex min-h-0 flex-1">
 		<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>

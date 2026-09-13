@@ -8,6 +8,7 @@ interface SelectionSnapshot {
 	primaryEdges: string[];
 	selectedEdges: string[];
 	focusedNode: string | null;
+	camera: { x: number; y: number; ratio: number };
 }
 
 interface SelectionCandidates {
@@ -52,6 +53,10 @@ async function clickStage(page: import('@playwright/test').Page) {
 	});
 }
 
+async function selectionSnapshot(page: import('@playwright/test').Page) {
+	return page.evaluate(() => window.rugbyGraphSelectionTest!.snapshot() as SelectionSnapshot);
+}
+
 test('OpenSpec node-selection: primary, secondary, replacement, clear, and promotion transitions', async ({ page }) => {
 	await openSelectionHarness(page);
 	const { primary, neighbor, nonNeighbor } = await candidates(page);
@@ -84,6 +89,22 @@ test('OpenSpec node-selection: primary, secondary, replacement, clear, and promo
 
 	snapshot = await clickStage(page);
 	expect(snapshot).toMatchObject({ primaryNode: null, secondaryNode: null, activeNodes: [], selectedEdges: [] });
+});
+
+test('OpenSpec node-selection: focuses covariant derivative within the current layout', async ({ page }) => {
+	await openSelectionHarness(page);
+	await page.waitForTimeout(500);
+	await clickNode(page, 'covariant derivative');
+	await page.waitForTimeout(650);
+	const snapshot = await selectionSnapshot(page);
+
+	expect(snapshot.focusedNode).toBe('covariant derivative');
+	expect(snapshot.camera.x).toBeGreaterThanOrEqual(0);
+	expect(snapshot.camera.x).toBeLessThanOrEqual(1);
+	expect(snapshot.camera.y).toBeGreaterThanOrEqual(0);
+	expect(snapshot.camera.y).toBeLessThanOrEqual(1);
+	expect(snapshot.camera.ratio).toBeGreaterThanOrEqual(0.1);
+	expect(snapshot.camera.ratio).toBeLessThanOrEqual(2);
 });
 
 test('OpenSpec node-selection: hover styles retain labels and backdrops', async () => {

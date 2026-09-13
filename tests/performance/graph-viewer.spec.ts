@@ -54,7 +54,7 @@ async function measureGraph(page: import('@playwright/test').Page, path: string)
 
 	const viewer = page.getByLabel('Graph viewer');
 	await expect(viewer.getByText('ready')).toBeVisible({ timeout: 30_000 });
-	await expect(viewer.getByText('nodes 2085 · edges 5409')).toBeVisible();
+	await expect(viewer.getByText('nodes 2085 · edges 4906')).toBeVisible();
 
 	const canvas = viewer.locator('canvas').first();
 	await expect(canvas).toBeVisible();
