@@ -1,42 +1,16 @@
-# Dependencies
-node_modules/
-.pnp
-.pnp.js
+# Local code indexes
+/.cocoindex_code/
+/.codegraph/
 
-# Testing
-/coverage/
+# Agent runtime data and generated skill links
+/.agent/
+/.claude/skills/
 
-# Production builds
-/build
-/dist
-/.svelte-kit/package/
-
-# Misc
-.DS_Thumb
+# JavaScript tooling
+/node_modules/
+/.svelte-kit/
+/build/
+/.vite/
 .env
 .env.*
-npm-debug.log*
-
-# Opencode artifacts
-.agent/
-.agent/**
-.opencode/
-.opencode/**
-.cocoindex_code/
-.cocoindex_code/**
-.codegraph/
-.codegraph/**
-.svelte-kit/
-.svelte-kit/
-
-# Logs
-*.log
-dev-server.log
-dev-server.pid
-
-# Rollback directories
-rollback-*/
-rollback-*/**
-
-# Package files
-package-lock.json
+!.env.example
