@@ -17,6 +17,22 @@
 		diagnostics: string[];
 	}
 
+	interface SelectionSnapshot {
+		primaryNode: string | null;
+		secondaryNode: string | null;
+		activeNodes: string[];
+		primaryEdges: string[];
+		selectedEdges: string[];
+		focusedNode: string | null;
+	}
+
+	interface SelectionTestController {
+		candidates: () => { primary: string; neighbor: string; nonNeighbor: string };
+		clickNode: (node: string) => void;
+		clickStage: () => void;
+		snapshot: () => SelectionSnapshot;
+	}
+
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
 	let loaded = $state(false);
@@ -31,7 +47,10 @@
 	onMount(async () => {
 		if (!container) return;
 		const graphContainer = container;
-		const performanceWindow = window as Window & { rugbyGraphPerformance?: PerformanceSnapshot };
+		const performanceWindow = window as Window & {
+			rugbyGraphPerformance?: PerformanceSnapshot;
+			rugbyGraphSelectionTest?: SelectionTestController;
+		};
 		const searchParameters = new URLSearchParams(window.location.search);
 		const performanceProfile = searchParameters.get('performance') ?? 'baseline';
 		const edgeOpacity = performanceProfile === 'opaque' ? 1 : 0.3;
@@ -53,7 +72,11 @@
 		let dataset: Dataset;
 		try {
 			const response = await fetch('/wikipedia.json');
+			if (!response.ok) throw new Error('dataset request failed');
 			dataset = await response.json();
+			if (!Array.isArray(dataset.nodes) || dataset.nodes.length === 0 || !Array.isArray(dataset.edges) || !Array.isArray(dataset.clusters)) {
+				throw new Error('dataset is invalid');
+			}
 		} catch {
 			status = 'dataset failed to load';
 			return;
@@ -257,7 +280,10 @@
 			},
 		});
 
+		let focusedNode: string | null = null;
+
 		function focusPrimaryNeighborhood(node: string) {
+			focusedNode = node;
 			const nodes = [node, ...graph.neighbors(node)];
 			const coordinates = nodes.map((key) => graph.getNodeAttributes(key));
 			const neighborhoodMinX = Math.min(...coordinates.map(({ x }) => x as number));
@@ -344,6 +370,39 @@
 			selectPrimaryNode(node);
 		}
 
+		function clearSelection() {
+			primaryNode = null;
+			secondaryNode = null;
+			focusedNode = null;
+			updateGraphState(null);
+		}
+
+		function selectionSnapshot(): SelectionSnapshot {
+			const activeNodes = primaryNode ? [primaryNode, ...graph.neighbors(primaryNode)] : [];
+			const primaryEdges: string[] = [];
+			const selectedEdges: string[] = [];
+
+			graph.forEachEdge((edge) => {
+				const [source, target] = graph.extremities(edge);
+				if (primaryNode && secondaryNode && (source === primaryNode || target === primaryNode)) primaryEdges.push(edge);
+				if (primaryNode && secondaryNode && ((source === primaryNode && target === secondaryNode) || (source === secondaryNode && target === primaryNode))) {
+					selectedEdges.push(edge);
+				}
+			});
+
+			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode };
+		}
+
+		function selectionCandidates() {
+			const primary = graph.nodes().find((node) => graph.degree(node) > 0);
+			if (!primary) throw new Error('selection test requires a connected node');
+			const neighbor = graph.neighbors(primary)[0];
+			const primaryNeighborhood = new Set([primary, ...graph.neighbors(primary)]);
+			const nonNeighbor = graph.nodes().find((node) => !primaryNeighborhood.has(node));
+			if (!neighbor || !nonNeighbor) throw new Error('selection test requires a non-neighbor');
+			return { primary, neighbor, nonNeighbor };
+		}
+
 		renderer.on('enterNode', ({ node }) => {
 			setGraphCursor('pointer');
 			if (!primaryNode) updateGraphState(node);
@@ -356,9 +415,7 @@
 
 		renderer.on('clickNode', ({ node }) => handleNodeClick(node));
 		renderer.on('clickStage', () => {
-			primaryNode = null;
-			secondaryNode = null;
-			updateGraphState(null);
+			clearSelection();
 		});
 
 		renderer.on('doubleClickStage', ({ event }) => {
@@ -385,31 +442,43 @@
 				diagnostics: [...diagnostics],
 			};
 		}
+		if (searchParameters.get('test') === 'selection') {
+			performanceWindow.rugbyGraphSelectionTest = {
+				candidates: selectionCandidates,
+				clickNode: handleNodeClick,
+				clickStage: clearSelection,
+				snapshot: selectionSnapshot,
+			};
+		}
 		centerView = () => {
 			void renderer.getCamera().reset({ duration: 600 });
 		};
 		destroyRenderer = () => {
 			centerView = undefined;
+			delete performanceWindow.rugbyGraphSelectionTest;
 			renderer.kill();
 		};
 
 		nodeCount = graph.order;
 		edgeCount = graph.size;
 		loaded = true;
-		status = 'wikipedia concept network';
+		status = 'ready';
 		performance.mark('rugby-graph:graph-ready');
 	});
 
 	onDestroy(() => destroyRenderer?.());
 </script>
 
-<section class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-hairline-strong bg-canvas" aria-label="Graph viewer">
-	<header class="flex items-center gap-md border-b border-hairline px-md py-xs">
-		<span class="text-label-md font-medium">[ graph ]</span>
-		<span class="text-caption text-mute">{status}</span>
+<section id="graph-viewer" tabindex="-1" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-hairline-strong bg-canvas" aria-label="Graph viewer">
+	<header class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-sm border-b border-hairline px-sm py-xs sm:gap-md sm:px-md">
+		<span class="whitespace-nowrap text-label-md font-medium">[ graph ]</span>
+		<span class="min-w-0 whitespace-nowrap text-caption text-mute" aria-live="polite">
+			<span class="sm:hidden">{status === 'wikipedia concept network' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading'}</span>
+			<span class="hidden sm:inline">{status}</span>
+		</span>
 		<button
 			type="button"
-			class="ml-auto cursor-pointer border border-hairline-strong px-xs py-0.5 text-caption text-mute transition-colors hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
+			class="inline-flex min-h-9 shrink-0 cursor-pointer items-center whitespace-nowrap border border-hairline-strong px-xs py-0.5 text-caption text-mute transition-colors hover:border-accent hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:opacity-50"
 			onclick={() => centerView?.()}
 			disabled={!centerView}
 		>
@@ -419,14 +488,14 @@
 	<div class="relative flex min-h-0 flex-1">
 		<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>
 		{#if !loaded}
-			<div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-xs p-md text-center" aria-hidden="true">
-				<p class="m-0 font-medium text-on-primary">[ rugby-graph ]</p>
-				<p class="m-0 text-on-primary">no graph loaded</p>
-				<p class="m-0 text-ash">run a signal to render the pitch</p>
+			<div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
+				<p class="m-0 font-medium text-on-primary">{status === 'dataset failed to load' ? '[ data unavailable ]' : '[ loading graph ]'}</p>
+				<p class="m-0 text-on-primary">{status === 'dataset failed to load' ? 'dataset failed to load' : 'building network'}</p>
+				<p class="m-0 text-ash">{status === 'dataset failed to load' ? 'refresh to try again' : 'loading nodes and edges'}</p>
 			</div>
 		{/if}
 	</div>
-	<footer class="flex items-center gap-lg border-t border-hairline px-md py-xs text-caption">
-		<span class="font-normal text-mute">nodes {nodeCount} · edges {edgeCount}</span>
+	<footer class="flex items-center gap-lg border-t border-hairline px-sm py-xs text-caption sm:px-md">
+		<span class="font-normal tabular-nums text-mute">nodes {nodeCount} · edges {edgeCount}</span>
 	</footer>
 </section>

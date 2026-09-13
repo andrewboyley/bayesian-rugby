@@ -53,7 +53,7 @@ async function measureGraph(page: import('@playwright/test').Page, path: string)
 	await page.goto(path, { waitUntil: 'domcontentloaded' });
 
 	const viewer = page.getByLabel('Graph viewer');
-	await expect(viewer.getByText('wikipedia concept network')).toBeVisible({ timeout: 30_000 });
+	await expect(viewer.getByText('ready')).toBeVisible({ timeout: 30_000 });
 	await expect(viewer.getByText('nodes 2085 · edges 5409')).toBeVisible();
 
 	const canvas = viewer.locator('canvas').first();

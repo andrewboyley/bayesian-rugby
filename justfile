@@ -76,6 +76,11 @@ build:
 performance:
     pnpm run test:performance
 
+# Run deterministic tests for OpenSpec requirements.
+[group('quality')]
+test:
+    pnpm run test:specifications
+
 # Run all project quality gates.
 [group('quality')]
 verify: check lint build

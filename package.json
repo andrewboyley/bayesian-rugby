@@ -19,7 +19,8 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"lint": "eslint .",
-		"test:performance": "playwright test --config=playwright.config.ts"
+		"test:performance": "playwright test --config=playwright.config.ts tests/performance",
+		"test:specifications": "playwright test --config=playwright.config.ts tests/specifications"
   },
   "dependencies": {
     "graphology": "0.26.0",
