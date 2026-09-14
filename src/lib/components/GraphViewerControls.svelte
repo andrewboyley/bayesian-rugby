@@ -1,7 +1,12 @@
 <script lang="ts">
 	import type { ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
+	import Button from '#lib/components/Button.svelte';
+	import PanelBar from '#lib/components/PanelBar.svelte';
+	import WorkspaceTabs from '#lib/components/WorkspaceTabs.svelte';
 
 	let {
+		open,
+		onToggle,
 		loaded,
 		hasMoreNodes,
 		onAddNode,
@@ -12,6 +17,8 @@
 		settings,
 		onSettingsChange,
 	}: {
+		open: boolean;
+		onToggle: () => void;
 		loaded: boolean;
 		hasMoreNodes: boolean;
 		onAddNode: (() => void) | undefined;
@@ -22,44 +29,66 @@
 		settings: ForceAtlas2Settings;
 		onSettingsChange: <Key extends keyof ForceAtlas2Settings>(key: Key, value: ForceAtlas2Settings[Key]) => void;
 		} = $props();
-	let forceAtlasOpen = $state(false);
+	type Tab = 'graph' | 'layout';
+
+	let activeTab = $state<Tab>('graph');
+	const tabs = [
+		{ id: 'graph', label: 'graph', panelId: 'graph-panel' },
+		{ id: 'layout', label: 'layout', panelId: 'layout-panel' },
+	];
+
+	function selectTab(tab: Tab) {
+		activeTab = tab;
+		if (!open) onToggle();
+	}
+
+	function clickTab(tab: Tab) {
+		if (open && activeTab === tab) {
+			onToggle();
+			return;
+		}
+		selectTab(tab);
+	}
+
 </script>
 
-<div class="grid w-full gap-md" aria-label="Graph controls">
-	<div class="flex flex-wrap items-center gap-sm">
-		<button
-			type="button"
-			class="inline-flex h-9 w-fit cursor-pointer items-center whitespace-nowrap rounded-sm bg-primary px-5 py-1 text-button-md font-medium text-on-primary transition-colors hover:bg-ink-deep focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:bg-surface-card disabled:text-ash"
-			onclick={onAddNode}
-			disabled={!loaded || !hasMoreNodes || !onAddNode}
-		>
-			[ add node ]
-		</button>
-		<button
-			type="button"
-			class:!bg-primary={repeating}
-			class:!text-on-primary={repeating}
-			class="inline-flex h-9 w-fit cursor-pointer items-center whitespace-nowrap rounded-sm border border-ink px-5 py-1 text-button-md font-medium text-ink transition-colors hover:bg-surface-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px disabled:cursor-not-allowed disabled:border-hairline disabled:text-ash"
-			onclick={onToggleRepeating}
-			disabled={!loaded || (!hasMoreNodes && !repeating) || !onToggleRepeating}
-		>
-			{repeating ? '[ stop adding ]' : '[ auto add ]'}
-		</button>
-		<label class="flex min-h-9 items-center gap-sm text-caption text-body">
-			<span>rate {nodesPerSecond} nodes/s</span>
-			<input class="h-4 w-32 accent-ink" aria-label="Nodes added per second" type="range" min="1" max="10" step="1" value={nodesPerSecond} oninput={(event) => onNodesPerSecondChange?.(Number(event.currentTarget.value))} disabled={!loaded} />
-		</label>
-	</div>
+	<div id="graph-control-tabs" class={`flex h-full min-h-0 w-full flex-col ${open ? 'lg:flex-row' : ''}`}>
+		<div id="graph-control-bar" class={`relative flex border-b border-hairline-strong ${open ? 'lg:h-full lg:w-10 lg:flex-col lg:border-r lg:border-b-0' : 'h-full lg:w-full lg:flex-col lg:justify-start lg:border-b-0'}`}>
+			<button id="graph-control-toggle-surface" type="button" class="absolute inset-0 cursor-pointer hover:bg-surface-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" aria-label={open ? 'Collapse controls' : 'Expand controls'} aria-controls="graph-control-tabs" aria-expanded={open} onclick={onToggle}></button>
+			<PanelBar id="graph-control-marker" title="controls" {open} controls="graph-control-tabs" vertical onToggle={onToggle} />
+			<WorkspaceTabs {tabs} activeId={activeTab} {open} onTabClick={(tab) => clickTab(tab as Tab)} onTabSelect={(tab) => selectTab(tab as Tab)} />
+		</div>
 
-	<details class="border-t border-hairline pt-sm" bind:open={forceAtlasOpen}>
-		<summary class="flex h-9 cursor-pointer list-none items-center justify-between text-caption text-mute [&::-webkit-details-marker]:hidden">
-			<span>[ forceatlas2 settings ]</span>
-			<span>{forceAtlasOpen ? '[ collapse ]' : '[ expand ]'}</span>
-		</summary>
-		<fieldset class="grid grid-cols-1 gap-sm pt-sm sm:grid-cols-2" disabled={!loaded}>
-		<label class="grid min-h-9 content-center gap-1 text-caption text-body">
-			<span>gravity {settings.gravity.toFixed(1)}</span>
-			<input class="h-4 w-full accent-ink" aria-label="Gravity" type="range" min="0" max="5" step="0.1" value={settings.gravity} oninput={(event) => onSettingsChange('gravity', Number(event.currentTarget.value))} />
+		<div class:hidden={!open} class="min-h-0 flex-1 overflow-y-auto p-sm">
+			{#if activeTab === 'graph'}
+				<div id="graph-panel" role="tabpanel" aria-labelledby="graph-tab" tabindex="0" class="grid gap-sm pr-xs">
+					<section class="border border-hairline" aria-labelledby="manual-add-heading">
+						<h3 id="manual-add-heading" class="m-0 border-b border-hairline px-sm py-xs text-caption font-medium text-mute">[ manual add ]</h3>
+						<div class="p-sm">
+							<Button variant="primary" onclick={onAddNode} disabled={!loaded || !hasMoreNodes || !onAddNode}>
+								Add node
+							</Button>
+						</div>
+					</section>
+					<section class="border border-hairline" aria-labelledby="automatic-add-heading">
+						<h3 id="automatic-add-heading" class="m-0 border-b border-hairline px-sm py-xs text-caption font-medium text-mute">[ automatic add ]</h3>
+						<div class="grid gap-sm p-sm">
+						<Button pressed={repeating} onclick={onToggleRepeating} disabled={!loaded || (!hasMoreNodes && !repeating) || !onToggleRepeating}>
+							{repeating ? 'Stop adding' : 'Auto add'}
+						</Button>
+						<label class="grid min-h-9 gap-1 text-caption text-body">
+							<span>rate {nodesPerSecond} nodes/s</span>
+							<input class="h-4 w-full accent-ink" aria-label="Nodes added per second" type="range" min="1" max="60" step="1" value={nodesPerSecond} oninput={(event) => onNodesPerSecondChange?.(Number(event.currentTarget.value))} disabled={!loaded} />
+						</label>
+					</div>
+					</section>
+				</div>
+			{:else}
+				<div id="layout-panel" role="tabpanel" aria-labelledby="layout-tab" tabindex="0">
+					<fieldset class="grid grid-cols-1 gap-sm pr-xs sm:grid-cols-2" disabled={!loaded}>
+			<label class="grid min-h-9 content-center gap-1 text-caption text-body">
+					<span>gravity {settings.gravity.toFixed(2)}</span>
+				<input class="h-4 w-full accent-ink" aria-label="Gravity" type="range" min="0" max="5" step="0.01" value={settings.gravity} oninput={(event) => onSettingsChange('gravity', Number(event.currentTarget.value))} />
 		</label>
 		<label class="grid min-h-9 content-center gap-1 text-caption text-body">
 			<span>repulsion {settings.scalingRatio}</span>
@@ -94,9 +123,11 @@
 			<span>outbound attraction</span>
 		</label>
 		<label class="flex min-h-9 items-center gap-sm text-caption text-body">
-			<input class="size-4 accent-ink" aria-label="Use strong gravity" type="checkbox" checked={settings.strongGravityMode} onchange={(event) => onSettingsChange('strongGravityMode', event.currentTarget.checked)} />
-			<span>strong gravity</span>
-		</label>
-		</fieldset>
-	</details>
-</div>
+				<input class="size-4 accent-ink" aria-label="Use strong gravity" type="checkbox" checked={settings.strongGravityMode} onchange={(event) => onSettingsChange('strongGravityMode', event.currentTarget.checked)} />
+				<span>strong gravity</span>
+			</label>
+					</fieldset>
+				</div>
+			{/if}
+		</div>
+	</div>

@@ -61,10 +61,20 @@ follow:
 check:
     pnpm run check
 
-# Run ESLint.
+# Run Oxlint.
 [group('quality')]
 lint:
     pnpm run lint
+
+# Format project source files.
+[group('quality')]
+format-source:
+    pnpm run format
+
+# Make sure that project source files are formatted.
+[group('quality')]
+format-source-check:
+    pnpm run format:check
 
 # Produce a production build.
 [group('quality')]
@@ -83,4 +93,4 @@ test:
 
 # Run all project quality gates.
 [group('quality')]
-verify: check lint build
+verify: check lint format-source-check build

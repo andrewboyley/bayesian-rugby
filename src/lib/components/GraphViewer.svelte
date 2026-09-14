@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import GraphViewerControls from '#lib/components/GraphViewerControls.svelte';
+	import PanelBar from '#lib/components/PanelBar.svelte';
+	import WorkspacePanel from '#lib/components/WorkspacePanel.svelte';
 	import { defaultForceAtlas2Settings, ForceAtlas2Layout, type ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
 	import { createGraphModel } from '#lib/graph/graph-model.ts';
 	import { GraphProjection } from '#lib/graph/graph-projection.ts';
@@ -59,7 +61,7 @@
 	let hasMoreNodes = $state(false);
 	let addNode = $state<(() => void) | undefined>(undefined);
 	let repeatingNodes = $state(false);
-	let nodesPerSecond = $state(2);
+	let nodesPerSecond = $state(10);
 	let toggleRepeatingNodes = $state<(() => void) | undefined>(undefined);
 	let setNodesPerSecond = $state<((value: number) => void) | undefined>(undefined);
 	let fa2Settings = $state<ForceAtlas2Settings>(defaultForceAtlas2Settings);
@@ -70,7 +72,24 @@
 	let centerView = $state<(() => void) | undefined>(undefined);
 	let primaryNode = $state<string | null>(null);
 	let secondaryNode = $state<string | null>(null);
+	let graphOpen = $state(true);
 	let controlsOpen = $state(true);
+	let resizeGraph = $state<(() => void) | undefined>(undefined);
+	let workspaceClass = $derived(
+		graphOpen
+			? controlsOpen
+				? 'grid-rows-[minmax(0,1fr)_minmax(10rem,28dvh)] lg:grid-cols-[minmax(0,1fr)_28rem]'
+				: 'grid-rows-[minmax(0,1fr)_auto] lg:grid-cols-[minmax(0,1fr)_2.5rem]'
+			: controlsOpen
+				? 'grid-rows-[auto_minmax(0,1fr)] lg:grid-cols-[2.5rem_minmax(0,1fr)]'
+				: 'content-start grid-rows-[auto_auto] lg:grid-cols-[2.5rem_2.5rem]'
+	);
+
+	function togglePanel(panel: 'graph' | 'controls') {
+		if (panel === 'graph') graphOpen = !graphOpen;
+		else controlsOpen = !controlsOpen;
+		requestAnimationFrame(() => resizeGraph?.());
+	}
 
 	onMount(async () => {
 		if (!container) return;
@@ -280,6 +299,7 @@
 				],
 			},
 		});
+		resizeGraph = () => renderer.resize();
 		const layout = new ForceAtlas2Layout(graph);
 		updateFa2Settings = (key, value) => {
 			fa2Settings = { ...fa2Settings, [key]: value };
@@ -589,6 +609,7 @@
 		};
 			destroyRenderer = () => {
 				centerView = undefined;
+				resizeGraph = undefined;
 				addNode = undefined;
 				toggleRepeatingNodes = undefined;
 				setNodesPerSecond = undefined;
@@ -612,41 +633,32 @@
 	onDestroy(() => destroyRenderer?.());
 </script>
 
-<div class="flex min-h-0 flex-1 flex-col gap-sm">
-	<section class="shrink-0 rounded-sm border border-hairline-strong bg-canvas px-sm sm:px-md" aria-label="Graph controls">
-		<details bind:open={controlsOpen}>
-			<summary class="flex h-9 cursor-pointer list-none items-center justify-between text-caption text-mute [&::-webkit-details-marker]:hidden">
-				<span>[ graph controls ]</span>
-				<span>{controlsOpen ? '[ collapse ]' : '[ expand ]'}</span>
-			</summary>
-			<div class="pb-sm">
-				<GraphViewerControls {loaded} {hasMoreNodes} onAddNode={addNode} repeating={repeatingNodes} {nodesPerSecond} onToggleRepeating={toggleRepeatingNodes} onNodesPerSecondChange={setNodesPerSecond} settings={fa2Settings} onSettingsChange={updateFa2Settings} />
-			</div>
-		</details>
-	</section>
-	<section id="graph-viewer" tabindex="-1" class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-sm border border-hairline-strong bg-canvas" aria-label="Graph viewer">
-	<header class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-sm border-b border-hairline px-sm py-xs sm:gap-md sm:px-md">
-		<span class="whitespace-nowrap text-label-md font-medium">[ graph ]</span>
-		<span class="min-w-0 whitespace-nowrap text-caption text-mute" aria-live="polite">
-			{#if statusShort === status}
-				{status}
-			{:else}
-				<span class="sm:hidden">{statusShort}</span><span class="hidden sm:inline">{status}</span>
-			{/if}
-		</span>
-	</header>
-	<div class="relative flex min-h-0 flex-1">
-		<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>
-		{#if !loaded}
-			<div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
-				<p class="m-0 font-medium text-on-primary">{status === 'dataset failed to load' ? '[ data unavailable ]' : '[ loading graph ]'}</p>
-				<p class="m-0 text-on-primary">{status === 'dataset failed to load' ? 'dataset failed to load' : 'building network'}</p>
-				<p class="m-0 text-ash">{status === 'dataset failed to load' ? 'refresh to try again' : 'loading nodes and edges'}</p>
-			</div>
-		{/if}
-	</div>
-	<footer class="flex items-center gap-lg border-t border-hairline px-sm py-xs text-caption sm:px-md">
-		<span class="font-normal tabular-nums text-mute">nodes {nodeCount} · edges {edgeCount}</span>
-	</footer>
-	</section>
+<div class={`grid min-h-0 flex-1 grid-cols-1 gap-sm ${workspaceClass} lg:grid-rows-1`}>
+	<WorkspacePanel as="section" id="graph-viewer" tabIndex={-1} label="Graph viewer" open={graphOpen} panelClass={graphOpen ? 'flex-1' : ''}>
+		<PanelBar title="graph" open={graphOpen} controls="graph-viewer-panel" vertical={!graphOpen} onToggle={() => togglePanel('graph')}>
+			<span class:hidden={!graphOpen} class="min-w-0 whitespace-nowrap text-caption text-mute" aria-live="polite">
+				{#if statusShort === status}
+					{status}
+				{:else}
+					<span class="sm:hidden">{statusShort}</span><span class="hidden sm:inline">{status}</span>
+				{/if}
+			</span>
+		</PanelBar>
+		<div id="graph-viewer-panel" class:hidden={!graphOpen} class="relative flex min-h-0 flex-1">
+				<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>
+				{#if !loaded}
+					<div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
+						<p class="m-0 font-medium text-on-primary">{status === 'dataset failed to load' ? '[ data unavailable ]' : '[ loading graph ]'}</p>
+						<p class="m-0 text-on-primary">{status === 'dataset failed to load' ? 'dataset failed to load' : 'building network'}</p>
+						<p class="m-0 text-ash">{status === 'dataset failed to load' ? 'refresh to try again' : 'loading nodes and edges'}</p>
+					</div>
+				{/if}
+		</div>
+		<footer class:hidden={!graphOpen} class="flex items-center gap-lg border-t border-hairline px-sm py-xs text-caption sm:px-md">
+			<span class="font-normal tabular-nums text-mute">nodes {nodeCount} · edges {edgeCount}</span>
+		</footer>
+	</WorkspacePanel>
+	<WorkspacePanel as="aside" label="Graph controls" open={controlsOpen}>
+		<GraphViewerControls open={controlsOpen} onToggle={() => togglePanel('controls')} {loaded} {hasMoreNodes} onAddNode={addNode} repeating={repeatingNodes} {nodesPerSecond} onToggleRepeating={toggleRepeatingNodes} onNodesPerSecondChange={setNodesPerSecond} settings={fa2Settings} onSettingsChange={updateFa2Settings} />
+	</WorkspacePanel>
 </div>

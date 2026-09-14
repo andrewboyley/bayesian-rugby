@@ -38,7 +38,9 @@ just dev          # Start Vite at http://localhost:5173
 just status       # Show server status
 just logs 200     # Print recent server logs
 just stop         # Stop the server
-just verify       # Run type checks, lint, and build
+just format-source       # Format supported source files with Oxfmt
+just format-source-check # Check supported source formatting with Oxfmt
+just verify              # Run type checks, Oxlint, formatting, and build
 ```
 
 `scripts/dev-server.sh` manages the background Vite process. It stores the process ID and log in `.agent/`.
@@ -56,7 +58,7 @@ Use the `#lib/*` import alias for code in `src/lib`. Use Svelte runes for new co
 
 ## Checks
 
-Run `just verify` before you finish a code change. It runs Svelte and TypeScript checks, ESLint, and a production build.
+Run `just verify` before you finish a code change. It runs Svelte and TypeScript checks, Oxlint, Oxfmt, and a production build.
 
 If you change `justfile`, run `just format-check`. If you change `DESIGN.md`, run `pnpm dlx @google/design.md lint DESIGN.md`.
 
