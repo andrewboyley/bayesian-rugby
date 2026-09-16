@@ -350,7 +350,6 @@
 		};
 		let revealRun = 0;
 		let revealTimer: number | undefined;
-		let addLayoutFrame: number | undefined;
 		let addNodesInterval: ReturnType<typeof setInterval> | undefined;
 		let revealTrace: { phase: string; ms: number }[] = [];
 		const popFrames: number[] = [];
@@ -517,14 +516,11 @@
 			const index = model.nodesByDescendingDegree[nextNodeOffset];
 			if (index === undefined) return;
 			projection.applyDelta({ activate: [index] }, 1, true);
+			const angle = index * 2.399963229728653;
+			projection.setPosition(index, Math.cos(angle) * 0.001, Math.sin(angle) * 0.001);
 			scheduleVisibleSizeRescale();
 			scheduleGridRedraw();
-			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
-			addLayoutFrame = requestAnimationFrame(() => {
-				const angle = index * 2.399963229728653;
-				projection.setPosition(index, Math.cos(angle) * 0.001, Math.sin(angle) * 0.001);
-				layout.restart();
-			});
+			layout.restart();
 			nextNodeOffset += 1;
 			nodeCount = projection.visibleCount();
 			edgeCount = graph.size;
@@ -781,7 +777,6 @@
 				stopRepeatingNodes();
 				revealRun += 1;
 			if (revealTimer !== undefined) window.clearTimeout(revealTimer);
-			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
 			for (const frame of popFrames) cancelAnimationFrame(frame);
 			if (gridFrame !== undefined) cancelAnimationFrame(gridFrame);
 			if (sizeFrame !== undefined) cancelAnimationFrame(sizeFrame);

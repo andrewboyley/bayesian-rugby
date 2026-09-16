@@ -278,6 +278,14 @@ test("OpenSpec graph-projection: double-clicking the canvas fits every visible n
   await expect.poll(async () => (await snapshot(page)).visibleNodes).toBe(6);
   await page.waitForTimeout(2500);
 
+  const spread = await page.evaluate(() => {
+    const views = window.rugbyGraphProjectionTest!.nodeViewports();
+    const keys = new Set(views.map((node) => `${node.rawX.toFixed(6)}|${node.rawY.toFixed(6)}`));
+    return { total: views.length, distinct: keys.size };
+  });
+  expect(spread.total).toBe(6);
+  expect(spread.distinct).toBe(6);
+
   const before = await snapshot(page);
   const gridBox = await page.locator("#graph-grid").boundingBox();
   expect(gridBox).not.toBeNull();
