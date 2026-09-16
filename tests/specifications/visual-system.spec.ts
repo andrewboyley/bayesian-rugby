@@ -25,9 +25,9 @@ test("OpenSpec visual-system: Tailwind theme contains required design tokens wit
     readFile(new URL("../../package.json", import.meta.url), "utf8"),
   ]);
 
-  expect(stylesheet).toContain("@import 'tailwindcss'");
+  expect(stylesheet).toContain('@import "tailwindcss"');
   for (const token of requiredThemeTokens) expect(stylesheet).toContain(token);
-  expect(viteConfig).toContain("import tailwindcss from '@tailwindcss/vite'");
+  expect(viteConfig).toContain('import tailwindcss from "@tailwindcss/vite"');
   expect(viteConfig).toContain("tailwindcss()");
   expect(packageJson.toLowerCase()).not.toContain("daisyui");
 });

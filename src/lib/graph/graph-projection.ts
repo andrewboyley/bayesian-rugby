@@ -56,7 +56,7 @@ export class GraphProjection {
         color: node.color,
         score: node.score,
         displayScore: node.score * startScale,
-        size: 0.05,
+        size: 1,
       });
       changedNodes.push(node.key);
 
@@ -87,23 +87,28 @@ export class GraphProjection {
     }
   }
 
-  rescaleVisibleDegrees(minimum: number, maximum: number) {
+  rescaleVisibleSizes() {
     const degreeForMaximumSize = 5;
-    for (let index = 0; index < this.model.nodes.length; index += 1) {
-      if (!this.visible[index]) continue;
-      const node = this.model.nodes[index];
-      const visibleDegree = this.model.incidentEdges[index].reduce((count, edgeIndex) => {
-        const neighbor =
-          this.model.edgeSources[edgeIndex] === index
-            ? this.model.edgeTargets[edgeIndex]
-            : this.model.edgeSources[edgeIndex];
-        return count + this.visible[neighbor];
-      }, 0);
-      const scale = Math.min(visibleDegree / degreeForMaximumSize, 1);
-      const displayScore = minimum + scale * (maximum - minimum);
-      this.graph.setNodeAttribute(node.key, "displayScore", displayScore);
-      this.graph.setNodeAttribute(node.key, "size", 0.05 + scale * 0.15);
-    }
+    this.graph.updateEachNodeAttributes(
+      (key, attributes) => {
+        const index = this.model.nodeIndexByKey.get(key);
+        if (index === undefined || !this.visible[index]) return attributes;
+        const scale = Math.min(this.visibleDegree(index) / degreeForMaximumSize, 1);
+        attributes.size = 1 + scale * 3;
+        return attributes;
+      },
+      { attributes: ["size"] },
+    );
+  }
+
+  private visibleDegree(index: number) {
+    return this.model.incidentEdges[index].reduce((count, edgeIndex) => {
+      const neighbor =
+        this.model.edgeSources[edgeIndex] === index
+          ? this.model.edgeTargets[edgeIndex]
+          : this.model.edgeSources[edgeIndex];
+      return count + this.visible[neighbor];
+    }, 0);
   }
 
   setPosition(index: number, x: number, y: number) {

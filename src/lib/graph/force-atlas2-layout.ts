@@ -60,6 +60,10 @@ export class ForceAtlas2Layout {
     this.layout.start();
   }
 
+  stop() {
+    this.layout.stop();
+  }
+
   snapshot(): LayoutSnapshot {
     return { running: this.layout.isRunning(), activeNodes: this.graph.order };
   }

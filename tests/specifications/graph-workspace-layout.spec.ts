@@ -89,10 +89,10 @@ test("OpenSpec graph-workspace-layout: panel bars and tabs show hover feedback",
   await openWorkspace(page, { width: 1280, height: 900 });
 
   const graphBar = page.locator("#graph-viewer > button");
-  const controlsBar = page.locator("#graph-control-marker");
+  const controlsBar = page.locator("#graph-control-toggle-surface");
   const graphTab = page.getByRole("tab", { name: "[ graph ]" });
   await expect(graphBar.locator("span").first()).toHaveText("− graph");
-  await expect(controlsBar).toHaveText("− controls");
+  await expect(page.locator("#graph-control-marker")).toHaveText("− controls");
   const graphBarColor = await graphBar.evaluate(
     (element) => getComputedStyle(element).backgroundColor,
   );
@@ -142,7 +142,7 @@ test("OpenSpec graph-workspace-layout: panel headers restore the graph, selected
   await expect(page.getByText("gravity 0.12")).toBeVisible();
 
   const controls = page.getByRole("complementary", { name: "Graph controls" });
-  const controlsHeader = page.locator("#graph-control-marker");
+  const controlsHeader = page.locator("#graph-control-toggle-surface");
   const graphHeader = page.getByLabel("Graph viewer").getByRole("button");
   await page.locator("#graph-control-toggle-surface").click();
   await expect(page.locator("#layout-panel")).toBeHidden();
@@ -157,7 +157,7 @@ test("OpenSpec graph-workspace-layout: panel headers restore the graph, selected
   await expect(page.locator("#layout-panel")).toBeVisible();
   await controlsHeader.click();
   await expect(page.locator("#layout-panel")).toBeHidden();
-  await page.locator("#graph-control-marker").click();
+  await controlsHeader.click();
   await graphHeader.click();
   await expect(page.locator("#graph-viewer-panel")).toBeHidden();
   const collapsedGraph = await page.getByLabel("Graph viewer").boundingBox();

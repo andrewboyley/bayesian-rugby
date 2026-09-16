@@ -20,6 +20,7 @@ interface SelectionCandidates {
 interface SelectionTestController {
   candidates: () => SelectionCandidates;
   clickNode: (node: string) => void;
+  doubleClickNode: (node: string) => void;
   clickStage: () => void;
   snapshot: () => SelectionSnapshot;
 }
@@ -110,20 +111,16 @@ test("OpenSpec node-selection: primary, secondary, replacement, clear, and promo
   });
 });
 
-test("OpenSpec node-selection: focuses covariant derivative within the current layout", async ({
-  page,
-}) => {
+test("OpenSpec node-selection: clicking a node fits its neighborhood", async ({ page }) => {
   await openSelectionHarness(page);
   await page.waitForTimeout(500);
+  const before = await selectionSnapshot(page);
   await clickNode(page, "covariant derivative");
   await page.waitForTimeout(650);
   const snapshot = await selectionSnapshot(page);
 
   expect(snapshot.focusedNode).toBe("covariant derivative");
-  expect(snapshot.camera.x).toBeGreaterThanOrEqual(0);
-  expect(snapshot.camera.x).toBeLessThanOrEqual(1);
-  expect(snapshot.camera.y).toBeGreaterThanOrEqual(0);
-  expect(snapshot.camera.y).toBeLessThanOrEqual(1);
+  expect(snapshot.camera).not.toEqual(before.camera);
   expect(snapshot.camera.ratio).toBeGreaterThan(0);
 });
 

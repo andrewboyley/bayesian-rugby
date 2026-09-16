@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
 	import Button from '#lib/components/Button.svelte';
-	import PanelBar from '#lib/components/PanelBar.svelte';
 	import WorkspaceTabs from '#lib/components/WorkspaceTabs.svelte';
 
 	let {
@@ -55,7 +54,9 @@
 	<div id="graph-control-tabs" class={`flex h-full min-h-0 w-full flex-col ${open ? 'lg:flex-row' : ''}`}>
 		<div id="graph-control-bar" class={`relative flex border-b border-hairline-strong ${open ? 'lg:h-full lg:w-10 lg:flex-col lg:border-r lg:border-b-0' : 'h-full lg:w-full lg:flex-col lg:justify-start lg:border-b-0'}`}>
 			<button id="graph-control-toggle-surface" type="button" class="absolute inset-0 cursor-pointer hover:bg-surface-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent" aria-label={open ? 'Collapse controls' : 'Expand controls'} aria-controls="graph-control-tabs" aria-expanded={open} onclick={onToggle}></button>
-			<PanelBar id="graph-control-marker" title="controls" {open} controls="graph-control-tabs" vertical onToggle={onToggle} />
+			<span id="graph-control-marker" class="pointer-events-none relative z-10 grid h-9 grid-cols-[auto_minmax(0,1fr)] items-center gap-sm border-b border-hairline px-sm py-xs text-left text-caption text-mute sm:gap-md sm:px-md lg:h-auto lg:w-full lg:grid-cols-1 lg:content-start lg:[writing-mode:vertical-rl]">
+				{open ? '−' : '+'} controls
+			</span>
 			<WorkspaceTabs {tabs} activeId={activeTab} {open} onTabClick={(tab) => clickTab(tab as Tab)} onTabSelect={(tab) => selectTab(tab as Tab)} />
 		</div>
 

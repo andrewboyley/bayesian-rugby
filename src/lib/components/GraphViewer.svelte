@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
+	import GraphGrid from '#lib/components/GraphGrid.svelte';
 	import GraphViewerControls from '#lib/components/GraphViewerControls.svelte';
 	import PanelBar from '#lib/components/PanelBar.svelte';
 	import WorkspacePanel from '#lib/components/WorkspacePanel.svelte';
@@ -36,6 +37,7 @@
 	interface SelectionTestController {
 		candidates: () => { primary: string; neighbor: string; nonNeighbor: string };
 		clickNode: (node: string) => void;
+		doubleClickNode: (node: string) => void;
 		clickStage: () => void;
 		snapshot: () => SelectionSnapshot;
 	}
@@ -45,13 +47,27 @@
 		visibleEdges: number;
 		layoutRunning: boolean;
 		layoutActiveNodes: number;
+		camera: { x: number; y: number; ratio: number };
 	}
 
 	interface ProjectionTestController {
 		reveal: () => void;
+		showFirstNode: () => void;
+		showEmptyGraph: () => void;
+		firstNodeViewport: () => Coordinates;
+		firstNodeSize: () => number;
+		firstNodeSizePx: () => number;
+		firstNodePixelRadius: () => number;
+		firstTwoNodeClearance: () => number;
+		nodeViewports: () => { rawX: number; rawY: number; size: number; px: number; py: number }[];
+		stopLayout: () => void;
+		setCamera: (state: { x: number; y: number; ratio: number }) => void;
+		addNode: () => void;
 		snapshot: () => ProjectionSnapshot;
 		lastTrace: () => { phase: string; ms: number }[];
 	}
+
+	type Coordinates = { x: number; y: number };
 
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
@@ -69,12 +85,13 @@
 	let statusShort = $derived(status === 'ready' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading');
 
 	let destroyRenderer: (() => void) | undefined;
-	let centerView = $state<(() => void) | undefined>(undefined);
 	let primaryNode = $state<string | null>(null);
 	let secondaryNode = $state<string | null>(null);
 	let graphOpen = $state(true);
 	let controlsOpen = $state(true);
 	let resizeGraph = $state<(() => void) | undefined>(undefined);
+	let gridViewportToGraph = $state<((coordinates: Coordinates) => Coordinates) | null>(null);
+	let gridRevision = $state(0);
 	let workspaceClass = $derived(
 		graphOpen
 			? controlsOpen
@@ -143,18 +160,21 @@
 		const projection = new GraphProjection(graph, model);
 		if (
 			searchParameters.get('test') === 'selection' ||
-			searchParameters.get('test') === 'projection'
+			(searchParameters.get('test') === 'projection' && !searchParameters.has('empty'))
 		) {
 			projection.applyDelta({ activate: Array.from({ length: model.nodes.length }, (_value, index) => index) });
+			projection.rescaleVisibleSizes();
 		}
 
 		const renderer = new Sigma(graph, graphContainer, {
 			settings: {
-				autoRescale: true,
-				nodeLabelEvents: "extend",
+				autoRescale: false,
+				itemSizesReference: 'positions',
+				nodeLabelEvents: 'extend',
 				antialiasEdges,
 				enableEdgeEvents,
 				pickingDownSizingRatio,
+				zoomToSizeRatioFunction: (ratio) => ratio,
 			},
 			customNodeState: { isActive: false, isPrimary: false, isSecondary: false },
 			customEdgeState: { isActive: false, isPrimaryEdge: false, isSelected: false },
@@ -193,7 +213,6 @@
 						color: {
 							attribute: 'color',
 						},
-						size: { attribute: 'displayScore', min: 3, max: 10, minValue: minScore, maxValue: maxScore },
 						label: { attribute: 'label' },
 						labelColor: '#fdfcfc',
 						labelFont: 'Berkeley Mono, JetBrains Mono, IBM Plex Mono, ui-monospace, monospace',
@@ -299,7 +318,31 @@
 				],
 			},
 		});
-		resizeGraph = () => renderer.resize();
+		let gridFrame: number | undefined;
+		let sizeFrame: number | undefined;
+		function scheduleGridRedraw() {
+			if (gridFrame !== undefined) return;
+			gridFrame = requestAnimationFrame(() => {
+				gridFrame = undefined;
+				gridRevision += 1;
+			});
+		}
+		function scheduleVisibleSizeRescale() {
+			if (sizeFrame !== undefined) return;
+			sizeFrame = requestAnimationFrame(() => {
+				sizeFrame = undefined;
+				projection.rescaleVisibleSizes();
+			});
+		}
+		gridViewportToGraph = (coordinates) => {
+			return renderer.viewportToGraph(coordinates);
+		};
+		resizeGraph = () => {
+			renderer.resize();
+			scheduleGridRedraw();
+		};
+		renderer.getCamera().on('updated', scheduleGridRedraw);
+		scheduleGridRedraw();
 		const layout = new ForceAtlas2Layout(graph);
 		updateFa2Settings = (key, value) => {
 			fa2Settings = { ...fa2Settings, [key]: value };
@@ -315,28 +358,60 @@
 
 		let focusedNode: string | null = null;
 
-		function focusPrimaryNeighborhood(node: string) {
-			focusedNode = node;
-			const nodes = [node, ...graph.neighbors(node)];
-			const coordinates = nodes.map((key) => {
-				const { x, y } = graph.getNodeAttributes(key);
-				return renderer.getNormalizationFunction()({ x: x as number, y: y as number });
-			});
-			const neighborhoodMinX = Math.min(...coordinates.map(({ x }) => x));
-			const neighborhoodMaxX = Math.max(...coordinates.map(({ x }) => x));
-			const neighborhoodMinY = Math.min(...coordinates.map(({ y }) => y));
-			const neighborhoodMaxY = Math.max(...coordinates.map(({ y }) => y));
-			const width = neighborhoodMaxX - neighborhoodMinX;
-			const height = neighborhoodMaxY - neighborhoodMinY;
+		const RADIUS_ONE_SCREEN_PX = 24;
+		function radiusOneFocusRatio() {
+			const { width, height } = renderer.getDimensions();
+			return Math.min(width, height) / (Math.max(width, height) * RADIUS_ONE_SCREEN_PX);
+		}
+		function radiusOneMinimumSpan() {
+			return radiusOneFocusRatio() / 1.2;
+		}
 
-			void renderer.getCamera().animate(
-				{
-					x: (neighborhoodMinX + neighborhoodMaxX) / 2,
-					y: (neighborhoodMinY + neighborhoodMaxY) / 2,
-					ratio: Math.max(width, height, 0.05) * 2,
+		function focusGraphBounds(minX: number, maxX: number, minY: number, maxY: number, minimumSpan?: number) {
+			const normalize = renderer.getNormalizationFunction();
+			const { width, height } = renderer.getDimensions();
+			const minimum = normalize({ x: minX, y: minY });
+			const maximum = normalize({ x: maxX, y: maxY });
+			const minFramedX = Math.min(minimum.x, maximum.x);
+			const maxFramedX = Math.max(minimum.x, maximum.x);
+			const minFramedY = Math.min(minimum.y, maximum.y);
+			const maxFramedY = Math.max(minimum.y, maximum.y);
+			const spanX = maxFramedX - minFramedX;
+			const spanY = maxFramedY - minFramedY;
+			return {
+				x: (minFramedX + maxFramedX) / 2,
+				y: (minFramedY + maxFramedY) / 2,
+				ratio: Math.max(spanX, spanY * (width / height), minimumSpan ?? 0) * 1.2,
+			};
+		}
+
+		function focusNodes(nodes: string[], focused: string | null) {
+			focusedNode = focused;
+			const bounds = nodes.reduce(
+				(bounds, key) => {
+					const { x, y, size } = graph.getNodeAttributes(key);
+					const radius = size as number;
+					return {
+						minX: Math.min(bounds.minX, (x as number) - radius),
+						maxX: Math.max(bounds.maxX, (x as number) + radius),
+						minY: Math.min(bounds.minY, (y as number) - radius),
+						maxY: Math.max(bounds.maxY, (y as number) + radius)
+					};
 				},
+				{ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
+			);
+			void renderer.getCamera().animate(
+				focusGraphBounds(bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, nodes.length === 1 ? radiusOneMinimumSpan() : undefined),
 				{ duration: 600 }
 			);
+		}
+
+		function focusPrimaryNeighborhood(node: string) {
+			focusNodes([node, ...graph.neighbors(node)], node);
+		}
+
+		function fitVisibleNodes() {
+			focusNodes(graph.nodes(), null);
 		}
 
 		function updateGraphState(hoveredNode: string | null) {
@@ -414,11 +489,13 @@
 
 		function projectionSnapshot(): ProjectionSnapshot {
 			const layoutSnapshot = layout.snapshot();
+			const { x, y, ratio } = renderer.getCamera().getState();
 			return {
 				visibleNodes: projection.visibleCount(),
 				visibleEdges: graph.size,
 				layoutRunning: layoutSnapshot.running,
 				layoutActiveNodes: layoutSnapshot.activeNodes,
+				camera: { x, y, ratio },
 			};
 		}
 
@@ -439,12 +516,9 @@
 		function addNextNodeByDegree() {
 			const index = model.nodesByDescendingDegree[nextNodeOffset];
 			if (index === undefined) return;
-			renderer.setSetting('autoRescale', projection.visibleCount() !== 0);
 			projection.applyDelta({ activate: [index] }, 1, true);
-			projection.rescaleVisibleDegrees(minScore, maxScore);
-			if (projection.visibleCount() === 1) {
-				void renderer.getCamera().animate({ x: 0.5, y: 0.5, ratio: 2 }, { duration: 0 });
-			}
+			scheduleVisibleSizeRescale();
+			scheduleGridRedraw();
 			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
 			addLayoutFrame = requestAnimationFrame(() => {
 				const angle = index * 2.399963229728653;
@@ -505,11 +579,14 @@
 			const revealNextBatch = () => {
 				if (run !== revealRun) return;
 				const batch = Array.from(model.nodesByDescendingScore.slice(offset, offset + 32)) as number[];
-				if (!batch.length) {
+			if (!batch.length) {
+					scheduleGridRedraw();
 					renderer.refresh();
 					return;
 				}
 				projection.applyDelta({ activate: batch }, 0.01);
+				scheduleVisibleSizeRescale();
+				scheduleGridRedraw();
 				animateNodePop(batch);
 				nodeCount = projection.visibleCount();
 				edgeCount = graph.size;
@@ -520,7 +597,37 @@
 			revealNextBatch();
 		}
 
-		function selectionSnapshot(): SelectionSnapshot {
+		function showFirstNode() {
+			stopRepeatingNodes();
+			clearSelection();
+			graph.clear();
+			projection.resetVisible();
+			nextNodeOffset = 0;
+			nodeCount = 0;
+			edgeCount = 0;
+			addNextNodeByDegree();
+		}
+
+		function showEmptyGraph() {
+			stopRepeatingNodes();
+			clearSelection();
+			graph.clear();
+			projection.resetVisible();
+			nextNodeOffset = 0;
+			nodeCount = 0;
+			edgeCount = 0;
+			centerEmptyGraph(false);
+			scheduleGridRedraw();
+		}
+
+		function centerEmptyGraph(animate = true) {
+			if (projection.visibleCount() !== 0) return;
+			const state = { x: 0.5, y: 0.5, ratio: radiusOneFocusRatio() };
+			if (animate) void renderer.getCamera().animate(state, { duration: 600 });
+			else renderer.getCamera().setState(state);
+		}
+
+	function selectionSnapshot(): SelectionSnapshot {
 			const { x, y, ratio } = renderer.getCamera().getState();
 			const activeNodes = primaryNode ? [primaryNode, ...graph.neighbors(primaryNode)] : [];
 			const primaryEdges: string[] = [];
@@ -557,14 +664,22 @@
 			if (!primaryNode) updateGraphState(null);
 		});
 
-		renderer.on('clickNode', ({ node }) => handleNodeClick(node));
+	renderer.on('clickNode', ({ node }) => handleNodeClick(node));
+		renderer.on('doubleClickNode', ({ node, event }) => {
+			event.preventSigmaDefault();
+			focusPrimaryNeighborhood(node);
+		});
+		renderer.on('doubleClickNodeLabel', ({ node, event }) => {
+			event.preventSigmaDefault();
+			focusPrimaryNeighborhood(node);
+		});
 		renderer.on('clickStage', () => {
 			clearSelection();
 		});
-
 		renderer.on('doubleClickStage', ({ event }) => {
 			event.preventSigmaDefault();
-			centerView?.();
+			if (projection.visibleCount() === 0) centerEmptyGraph();
+			else fitVisibleNodes();
 		});
 
 		if (hasDiagnostic('timers')) {
@@ -587,29 +702,79 @@
 			};
 		}
 		if (searchParameters.get('test') === 'selection') {
-			performanceWindow.rugbyGraphSelectionTest = {
-				candidates: selectionCandidates,
-				clickNode: handleNodeClick,
-				clickStage: clearSelection,
+		performanceWindow.rugbyGraphSelectionTest = {
+			candidates: selectionCandidates,
+			clickNode: handleNodeClick,
+			doubleClickNode: focusPrimaryNeighborhood,
+			clickStage: clearSelection,
 				snapshot: selectionSnapshot,
 			};
 		}
 		if (searchParameters.get('test') === 'projection') {
-			performanceWindow.rugbyGraphProjectionTest = {
-				reveal: revealNodesByScore,
+		performanceWindow.rugbyGraphProjectionTest = {
+			reveal: revealNodesByScore,
+			showFirstNode,
+			showEmptyGraph,
+			addNode: addNextNodeByDegree,
+			firstNodeViewport: () => {
+				const [node] = graph.nodes();
+				if (!node) throw new Error('first node is unavailable');
+				const { x, y } = graph.getNodeAttributes(node);
+				return renderer.graphToViewport({ x: x as number, y: y as number });
+			},
+			firstNodeSize: () => {
+				const [node] = graph.nodes();
+				if (!node) throw new Error('first node is unavailable');
+				return graph.getNodeAttributes(node).size as number;
+			},
+			firstNodeSizePx: () => {
+				const [node] = graph.nodes();
+				if (!node) throw new Error('first node is unavailable');
+				return graph.getNodeAttributes(node).size as number;
+			},
+			firstNodePixelRadius: () => {
+				const [node] = graph.nodes();
+				if (!node) throw new Error('first node is unavailable');
+				const { x, y, size } = graph.getNodeAttributes(node);
+				const center = renderer.graphToViewport({ x: x as number, y: y as number });
+				const edge = renderer.graphToViewport({ x: (x as number) + (size as number), y: y as number });
+				return Math.hypot(edge.x - center.x, edge.y - center.y);
+			},
+			firstTwoNodeClearance: () => {
+				const [first, second] = graph.nodes();
+				if (!first || !second) throw new Error('two nodes are required');
+				const firstNode = graph.getNodeAttributes(first);
+				const secondNode = graph.getNodeAttributes(second);
+				return (
+					Math.hypot((firstNode.x as number) - (secondNode.x as number), (firstNode.y as number) - (secondNode.y as number)) -
+					(firstNode.size as number) -
+					(secondNode.size as number)
+				);
+			},
+			setCamera: (state) => renderer.getCamera().setState(state),
+			stopLayout: () => layout.stop(),
+			nodeViewports: () =>
+				graph.nodes().map((node) => {
+					const { x, y, size } = graph.getNodeAttributes(node);
+					const viewport = renderer.graphToViewport({ x: x as number, y: y as number });
+					return {
+						rawX: x as number,
+						rawY: y as number,
+						size: size as number,
+						px: viewport.x,
+						py: viewport.y,
+					};
+				}),
 				snapshot: projectionSnapshot,
 				lastTrace: () => revealTrace,
 			};
 		}
+		centerEmptyGraph(false);
 		addNode = addNextNodeByDegree;
 		toggleRepeatingNodes = () => (repeatingNodes ? stopRepeatingNodes() : startRepeatingNodes());
 		setNodesPerSecond = updateNodesPerSecond;
-		centerView = () => {
-			void renderer.getCamera().reset({ duration: 600 });
-		};
-			destroyRenderer = () => {
-				centerView = undefined;
-				resizeGraph = undefined;
+		destroyRenderer = () => {
+			resizeGraph = undefined;
 				addNode = undefined;
 				toggleRepeatingNodes = undefined;
 				setNodesPerSecond = undefined;
@@ -618,6 +783,8 @@
 			if (revealTimer !== undefined) window.clearTimeout(revealTimer);
 			if (addLayoutFrame !== undefined) cancelAnimationFrame(addLayoutFrame);
 			for (const frame of popFrames) cancelAnimationFrame(frame);
+			if (gridFrame !== undefined) cancelAnimationFrame(gridFrame);
+			if (sizeFrame !== undefined) cancelAnimationFrame(sizeFrame);
 			layout.destroy();
 			delete performanceWindow.rugbyGraphSelectionTest;
 			delete performanceWindow.rugbyGraphProjectionTest;
@@ -644,10 +811,11 @@
 				{/if}
 			</span>
 		</PanelBar>
-		<div id="graph-viewer-panel" class:hidden={!graphOpen} class="relative flex min-h-0 flex-1">
-				<div bind:this={container} class="min-h-0 flex-1 bg-surface-dark"></div>
+		<div id="graph-viewer-panel" class:hidden={!graphOpen} class="relative flex min-h-0 flex-1 bg-surface-dark">
+				<GraphGrid viewportToGraph={gridViewportToGraph} revision={gridRevision} />
+				<div bind:this={container} class="relative z-10 min-h-0 flex-1"></div>
 				{#if !loaded}
-					<div class="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
+					<div class="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
 						<p class="m-0 font-medium text-on-primary">{status === 'dataset failed to load' ? '[ data unavailable ]' : '[ loading graph ]'}</p>
 						<p class="m-0 text-on-primary">{status === 'dataset failed to load' ? 'dataset failed to load' : 'building network'}</p>
 						<p class="m-0 text-ash">{status === 'dataset failed to load' ? 'refresh to try again' : 'loading nodes and edges'}</p>
