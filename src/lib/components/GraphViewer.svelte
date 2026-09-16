@@ -241,7 +241,7 @@
 					{
 						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasPrimarySelection: boolean }) =>
 							graphState.hasPrimarySelection && state.isActive,
-						then: { label: { attribute: 'label' }, labelVisibility: 'visible' },
+						then: { label: { attribute: 'label' }, labelVisibility: 'auto' },
 					},
 					{
 						whenState: 'isHovered',

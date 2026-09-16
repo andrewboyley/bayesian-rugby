@@ -64,6 +64,28 @@ If you change `justfile`, run `just format-check`. If you change `DESIGN.md`, ru
 
 Use Playwright for browser behavior and performance tests. Add focused tests when you add testable behavior.
 
+## Chrome DevTools Interaction
+
+The chrome-devtools tools drive the app through the browser. Use them for manual checks. Use Playwright for repeatable checks.
+
+Before an interaction, take a snapshot. The snapshot lists element uids. Uids change when the page updates. Take a fresh snapshot before each action. An old uid fails.
+
+Set `verbose` to true in the snapshot. The graph canvas appears only in the verbose snapshot.
+
+These interactions are proven:
+
+1. Click an element with its uid. A single click on empty canvas clears the node selection.
+2. Double-click an element with `dblClick` set to true. A double-click on the canvas fits all visible nodes.
+3. Pan the view with the drag action. Drag from the canvas uid to any element uid. The view follows the drag.
+4. Hover an element with its uid. The pointer moves to the element center.
+5. Zoom through a double-click, because the tools have no wheel action. Or call `setCamera` through script evaluation.
+
+The canvas is one element in the snapshot. You cannot click a node by uid. Call `window.rugbyGraphSelectionTest.clickNode('name')` or `.doubleClickNode('name')` through script evaluation instead.
+
+Read state through script evaluation. Call `snapshot()` on the controller for `primaryNode`, `activeNodes`, and `camera`. Do not read the on-screen "nodes N · edges N" text. It is stale.
+
+Do not dispatch synthetic DOM events, for example `el.dispatchEvent(new MouseEvent(...))`. Sigma ignores them because they are not trusted. Use the chrome-devtools tools or the controller instead.
+
 ## Performance Audits
 
 Run `just performance` before you finish a graph rendering change. It records whether its headless Chromium runner supports a WebGL GPU timer query.

@@ -136,3 +136,17 @@ test("OpenSpec node-selection: hover styles retain labels and backdrops", async 
   expect(source).toContain("backdropVisibility: 'visible'");
   expect(source).toContain("labelVisibility: 'hidden'");
 });
+
+test("OpenSpec node-selection: label visibility on click follows Sigma's default size threshold", async () => {
+  const source = await readFile(
+    new URL("../../src/lib/components/GraphViewer.svelte", import.meta.url),
+    "utf8",
+  );
+
+  const activeLabelRule =
+    /graphState\.hasPrimarySelection && state\.isActive[\s\S]*?then: \{ label: \{ attribute: 'label' \}, labelVisibility: '(auto|visible)' \}/;
+  const match = source.match(activeLabelRule);
+  expect(match).not.toBeNull();
+  expect(match![1]).toBe("auto");
+  expect(source).not.toContain("labelRenderedSizeThreshold: 0");
+});
