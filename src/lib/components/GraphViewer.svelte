@@ -351,6 +351,8 @@
 		let revealRun = 0;
 		let revealTimer: number | undefined;
 		let addNodesInterval: ReturnType<typeof setInterval> | undefined;
+		let addNodesAccumulator = 0;
+		let lastAddNodesTick = 0;
 		let revealTrace: { phase: string; ms: number }[] = [];
 		const popFrames: number[] = [];
 		let nextNodeOffset = 0;
@@ -520,7 +522,6 @@
 			projection.setPosition(index, Math.cos(angle) * 0.001, Math.sin(angle) * 0.001);
 			scheduleVisibleSizeRescale();
 			scheduleGridRedraw();
-			layout.restart();
 			nextNodeOffset += 1;
 			nodeCount = projection.visibleCount();
 			edgeCount = graph.size;
@@ -535,21 +536,38 @@
 		function stopRepeatingNodes() {
 			if (addNodesInterval !== undefined) clearInterval(addNodesInterval);
 			addNodesInterval = undefined;
+			addNodesAccumulator = 0;
 			repeatingNodes = false;
+		}
+
+		const ADD_NODES_CADENCE_MS = 100;
+
+		function addNodesBatch() {
+			if (!repeatingNodes) return;
+			const now = performance.now();
+			const elapsedSeconds = (now - lastAddNodesTick) / 1000;
+			lastAddNodesTick = now;
+			addNodesAccumulator += elapsedSeconds * nodesPerSecond;
+			let count = Math.floor(addNodesAccumulator);
+			addNodesAccumulator -= count;
+			if (count < 0) count = 0;
+			for (let i = 0; i < count; i++) {
+				if (!hasMoreNodes) return;
+				addNextNodeByDegree();
+			}
 		}
 
 		function startRepeatingNodes() {
 			if (!hasMoreNodes) return;
-			addNextNodeByDegree();
-			addNodesInterval = setInterval(addNextNodeByDegree, 1000 / nodesPerSecond);
 			repeatingNodes = true;
+			addNodesAccumulator = 0;
+			lastAddNodesTick = performance.now();
+			addNextNodeByDegree();
+			addNodesInterval = setInterval(addNodesBatch, ADD_NODES_CADENCE_MS);
 		}
 
 		function updateNodesPerSecond(value: number) {
 			nodesPerSecond = value;
-			if (!repeatingNodes) return;
-			if (addNodesInterval !== undefined) clearInterval(addNodesInterval);
-			addNodesInterval = setInterval(addNextNodeByDegree, 1000 / nodesPerSecond);
 		}
 
 		function revealNodesByScore() {

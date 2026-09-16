@@ -322,6 +322,39 @@ test("OpenSpec graph-projection: double-clicking the canvas fits every visible n
   }
 });
 
+test("OpenSpec graph-projection: FA2 stays running and separates nodes while adds continue", async ({
+  page,
+}) => {
+  await openProjectionHarness(page, true);
+  await page.evaluate(() => {
+    window.rugbyGraphProjectionTest!.showFirstNode();
+  });
+  await expect.poll(async () => (await snapshot(page)).visibleNodes).toBe(1);
+  for (let batch = 0; batch < 3; batch++) {
+    await page.evaluate(() => {
+      const add = window.rugbyGraphProjectionTest!.addNode;
+      for (let i = 0; i < 20; i++) add();
+    });
+    await page.waitForTimeout(400);
+    const state = await page.evaluate(() => {
+      const views = window.rugbyGraphProjectionTest!.nodeViewports();
+      const distinct = new Set(
+        views.map((node) => `${node.rawX.toFixed(4)}|${node.rawY.toFixed(4)}`),
+      ).size;
+      const far = views.filter((node) => Math.hypot(node.rawX, node.rawY) > 4).length;
+      return {
+        total: views.length,
+        distinct,
+        far,
+        layoutRunning: window.rugbyGraphProjectionTest!.snapshot().layoutRunning,
+      };
+    });
+    expect(state.layoutRunning).toBe(true);
+    expect(state.distinct).toBe(state.total);
+    expect(state.far).toBeGreaterThanOrEqual(state.total / 2);
+  }
+});
+
 test("OpenSpec graph-projection: camera grid follows pan and recomputes on zoom", async ({
   page,
 }) => {
@@ -474,7 +507,7 @@ test("OpenSpec graph-projection: automatic addition is rate-limited and cleaned 
     "utf8",
   );
 
-  expect(viewer).toContain("setInterval(addNextNodeByDegree, 1000 / nodesPerSecond)");
+  expect(viewer).toContain("setInterval(addNodesBatch, ADD_NODES_CADENCE_MS)");
   expect(viewer).toContain("stopRepeatingNodes();");
   expect(controls).toContain("'Auto add'");
   expect(controls).toContain("Nodes added per second");
