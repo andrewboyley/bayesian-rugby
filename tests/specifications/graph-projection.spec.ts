@@ -487,7 +487,9 @@ test("OpenSpec graph-projection: incremental nodes scale from visible connection
 
   expect(projection).toContain("rescaleVisibleSizes");
   expect(projection).toContain("visibleDegree");
-  expect(projection).toContain("degreeForMaximumSize");
+  expect(projection).toContain("DEGREE_SIZE_SLOPE");
+  expect(projection).not.toContain("degreeForMaximumSize");
+  expect(projection).not.toContain("Math.min(this.visibleDegree");
   expect(projection).toContain("size: 1");
   expect(projection).toContain("1 + scale * 3");
   expect(projection).toContain('"size"');

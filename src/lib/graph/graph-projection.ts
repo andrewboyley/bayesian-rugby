@@ -88,12 +88,12 @@ export class GraphProjection {
   }
 
   rescaleVisibleSizes() {
-    const degreeForMaximumSize = 5;
+    const DEGREE_SIZE_SLOPE = 5;
     this.graph.updateEachNodeAttributes(
       (key, attributes) => {
         const index = this.model.nodeIndexByKey.get(key);
         if (index === undefined || !this.visible[index]) return attributes;
-        const scale = Math.min(this.visibleDegree(index) / degreeForMaximumSize, 1);
+        const scale = this.visibleDegree(index) / DEGREE_SIZE_SLOPE;
         attributes.size = 1 + scale * 3;
         return attributes;
       },
