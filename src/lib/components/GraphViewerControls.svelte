@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
+	import type { GraphSettings } from '#lib/config/graph-settings.ts';
 	import Button from '#lib/components/Button.svelte';
 	import WorkspaceTabs from '#lib/components/WorkspaceTabs.svelte';
 
@@ -15,6 +16,8 @@
 		onNodesPerSecondChange,
 		settings,
 		onSettingsChange,
+		graphSettings,
+		onGraphSettingsChange,
 	}: {
 		open: boolean;
 		onToggle: () => void;
@@ -27,13 +30,16 @@
 		onNodesPerSecondChange: ((value: number) => void) | undefined;
 		settings: ForceAtlas2Settings;
 		onSettingsChange: <Key extends keyof ForceAtlas2Settings>(key: Key, value: ForceAtlas2Settings[Key]) => void;
-		} = $props();
-	type Tab = 'graph' | 'layout';
+		graphSettings: GraphSettings;
+		onGraphSettingsChange: (partial: Partial<GraphSettings>) => void;
+	} = $props();
 
+	type Tab = 'graph' | 'layout' | 'settings';
 	let activeTab = $state<Tab>('graph');
 	const tabs = [
 		{ id: 'graph', label: 'graph', panelId: 'graph-panel' },
 		{ id: 'layout', label: 'layout', panelId: 'layout-panel' },
+		{ id: 'settings', label: 'settings', panelId: 'settings-panel' },
 	];
 
 	function selectTab(tab: Tab) {
@@ -49,6 +55,91 @@
 		selectTab(tab);
 	}
 
+	// ── Settings panel configuration ──────────────────────────────────────────
+
+	type DomainKey = 'camera' | 'rendering' | 'layout';
+
+	interface SettingField {
+		key: `${DomainKey}.${string}`;
+		label: string;
+		type: 'range' | 'display';
+		min?: number;
+		max?: number;
+		step?: number;
+	}
+
+	const settingsSections: { id: DomainKey; label: string; fields: SettingField[] }[] = [
+		{
+			id: 'camera',
+			label: 'camera',
+			fields: [
+				{ key: 'camera.radiusOneScreenPx', label: 'radius', type: 'range', min: 10, max: 60, step: 1 },
+				{ key: 'camera.ratioFactor', label: 'ratio', type: 'range', min: 1, max: 3, step: 0.1 },
+				{ key: 'camera.defaultCenterX', label: 'center X', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'camera.defaultCenterY', label: 'center Y', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'camera.focusRatioMin', label: 'focus min', type: 'range', min: 0.05, max: 0.5, step: 0.01 },
+				{ key: 'camera.focusRatioMax', label: 'focus max', type: 'range', min: 1, max: 5, step: 0.1 },
+				{ key: 'camera.focusRatioFactor', label: 'focus factor', type: 'range', min: 1, max: 2, step: 0.05 },
+				{ key: 'camera.minSpan', label: 'min span', type: 'range', min: 0.01, max: 0.2, step: 0.005 },
+				{ key: 'camera.animationDurationMs', label: 'duration', type: 'range', min: 200, max: 2000, step: 50 },
+			],
+		},
+		{
+			id: 'rendering',
+			label: 'rendering',
+			fields: [
+				{ key: 'rendering.nodeInactiveOpacity', label: 'node inactive', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.nodeActiveOpacity', label: 'node active', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.nodePairInactiveOpacity', label: 'node pair', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.edgeInactiveOpacity', label: 'edge inactive', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.edgeOpacity', label: 'edge', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.edgeOpacityOpaque', label: 'edge opaque', type: 'range', min: 0, max: 1, step: 0.05 },
+				{ key: 'rendering.labelFontSize', label: 'label font', type: 'range', min: 8, max: 24, step: 1 },
+				{ key: 'rendering.labelBackgroundPadding', label: 'label pad', type: 'range', min: 0, max: 12, step: 1 },
+				{ key: 'rendering.backdropPadding', label: 'backdrop pad', type: 'range', min: 0, max: 20, step: 1 },
+				{ key: 'rendering.backdropCornerRadius', label: 'backdrop radius', type: 'range', min: 0, max: 12, step: 1 },
+				{ key: 'rendering.backdropBorderWidth', label: 'backdrop border', type: 'range', min: 0, max: 4, step: 1 },
+				{ key: 'rendering.backdropShadowBlur', label: 'backdrop blur', type: 'range', min: 0, max: 20, step: 1 },
+				{ key: 'rendering.pickingDownSizingRatioCoarse', label: 'coarse picking', type: 'range', min: 1, max: 8, step: 1 },
+				{ key: 'rendering.pickingDownSizingRatioNormal', label: 'normal picking', type: 'range', min: 1, max: 8, step: 1 },
+			],
+		},
+		{
+			id: 'layout',
+			label: 'layout',
+			fields: [
+				{ key: 'layout.popAnimationDurationMs', label: 'pop duration', type: 'range', min: 50, max: 500, step: 10 },
+				{ key: 'layout.goldenAngle', label: 'golden angle', type: 'display' },
+				{ key: 'layout.initialPositionOffset', label: 'initial offset', type: 'range', min: 0, max: 0.01, step: 0.001 },
+				{ key: 'layout.revealInitialScale', label: 'reveal scale', type: 'range', min: 0.005, max: 0.1, step: 0.005 },
+				{ key: 'layout.revealBatchSize', label: 'reveal batch', type: 'range', min: 4, max: 64, step: 4 },
+				{ key: 'layout.revealTimeoutMs', label: 'reveal timeout', type: 'range', min: 10, max: 100, step: 5 },
+				{ key: 'layout.addNodesCadenceMs', label: 'cadence', type: 'range', min: 50, max: 500, step: 10 },
+				{ key: 'layout.nodesPerSecond', label: 'nodes/s', type: 'range', min: 1, max: 30, step: 1 },
+			],
+		},
+	];
+
+	function resolveValue(settings: GraphSettings, path: string): number | boolean {
+		const parts = path.split('.');
+		let current: unknown = settings;
+		for (const part of parts) {
+			current = (current as Record<string, unknown>)[part];
+		}
+		return current as number | boolean;
+	}
+
+	function formatValue(value: number, step?: number): string {
+		if (step === undefined) return value.toString();
+		if (step >= 1) return Math.round(value).toString();
+		if (step >= 0.1) return value.toFixed(1);
+		return value.toFixed(2);
+	}
+
+	function handleFieldChange(domain: DomainKey, key: string, value: number | boolean) {
+		const updatedDomain = { ...graphSettings[domain], [key]: value };
+		onGraphSettingsChange({ [domain]: updatedDomain } as Partial<GraphSettings>);
+	}
 </script>
 
 	<div id="graph-control-tabs" class={`flex h-full min-h-0 w-full flex-col ${open ? 'lg:flex-row' : ''}`}>
@@ -84,10 +175,10 @@
 					</div>
 					</section>
 				</div>
-			{:else}
+			{:else if activeTab === 'layout'}
 				<div id="layout-panel" role="tabpanel" aria-labelledby="layout-tab" tabindex="0">
 					<fieldset class="grid grid-cols-1 gap-sm pr-xs sm:grid-cols-2" disabled={!loaded}>
-			<label class="grid min-h-9 content-center gap-1 text-caption text-body">
+						<label class="grid min-h-9 content-center gap-1 text-caption text-body">
 					<span>gravity {settings.gravity.toFixed(2)}</span>
 				<input class="h-4 w-full accent-ink" aria-label="Gravity" type="range" min="0" max="5" step="0.01" value={settings.gravity} oninput={(event) => onSettingsChange('gravity', Number(event.currentTarget.value))} />
 		</label>
@@ -128,6 +219,25 @@
 				<span>strong gravity</span>
 			</label>
 					</fieldset>
+				</div>
+			{:else}
+				<div id="settings-panel" role="tabpanel" aria-labelledby="settings-tab" tabindex="0" class="grid gap-sm pr-xs">
+					{#each settingsSections as section}
+						<section class="border border-hairline" aria-labelledby="{section.id}-heading">
+							<h3 id="{section.id}-heading" class="m-0 border-b border-hairline px-sm py-xs text-caption font-medium text-mute">[ {section.label} ]</h3>
+							<div class="grid gap-sm p-sm">
+								{#each section.fields as field}
+									{@const value = resolveValue(graphSettings, field.key)}
+									<label class="grid min-h-9 content-center gap-1 text-caption text-body">
+										<span>{field.label}{field.type === 'display' ? ` ${(value as number).toFixed(4)}` : ` ${formatValue(value as number, field.step)}`}</span>
+										{#if field.type === 'range'}
+											<input class="h-4 w-full accent-ink" aria-label={field.label} type="range" min={field.min} max={field.max} step={field.step} value={value as number} oninput={(event) => handleFieldChange(section.id, field.key.split('.')[1], Number(event.currentTarget.value))} disabled={!loaded} />
+										{/if}
+									</label>
+								{/each}
+							</div>
+						</section>
+					{/each}
 				</div>
 			{/if}
 		</div>

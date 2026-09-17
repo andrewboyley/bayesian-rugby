@@ -1,3 +1,5 @@
+import { defaultGraphSettings } from "../config/graph-settings";
+
 interface GraphLike {
   neighbors(node: string): string[];
   areNeighbors(source: string, target: string): boolean;
@@ -90,9 +92,16 @@ export function createGraphSelectionController(graph: GraphLike, renderer: Rende
       {
         x: (minX + maxX) / 2,
         y: (minY + maxY) / 2,
-        ratio: Math.min(2, Math.max(0.1, Math.max(maxX - minX, maxY - minY, 0.05) * 1.3)),
+        ratio: Math.min(
+          defaultGraphSettings.camera.focusRatioMax,
+          Math.max(
+            defaultGraphSettings.camera.focusRatioMin,
+            Math.max(maxX - minX, maxY - minY, defaultGraphSettings.camera.minSpan) *
+              defaultGraphSettings.camera.focusRatioFactor,
+          ),
+        ),
       },
-      { duration: 600 },
+      { duration: defaultGraphSettings.camera.animationDurationMs },
     );
   }
 

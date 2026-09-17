@@ -9,24 +9,26 @@
 import type Graph from "graphology";
 import type Sigma from "sigma";
 import type { GraphProjection } from "./graph-projection";
+import type { GraphSettings } from "../config/graph-settings";
 
 export interface CameraContext {
   renderer: Sigma;
   graph: Graph;
   projection: GraphProjection;
+  settings: GraphSettings;
   getFocusedNode: () => string | null;
   setFocusedNode: (node: string | null) => void;
 }
 
-const RADIUS_ONE_SCREEN_PX = 24;
-
 export function radiusOneFocusRatio(ctx: CameraContext): number {
   const { width, height } = ctx.renderer.getDimensions();
-  return Math.min(width, height) / (Math.max(width, height) * RADIUS_ONE_SCREEN_PX);
+  return (
+    Math.min(width, height) / (Math.max(width, height) * ctx.settings.camera.radiusOneScreenPx)
+  );
 }
 
 export function radiusOneMinimumSpan(ctx: CameraContext): number {
-  return radiusOneFocusRatio(ctx) / 1.2;
+  return radiusOneFocusRatio(ctx) / ctx.settings.camera.ratioFactor;
 }
 
 export function focusGraphBounds(
@@ -50,7 +52,8 @@ export function focusGraphBounds(
   return {
     x: (minFramedX + maxFramedX) / 2,
     y: (minFramedY + maxFramedY) / 2,
-    ratio: Math.max(spanX, spanY * (width / height), minimumSpan ?? 0) * 1.2,
+    ratio:
+      Math.max(spanX, spanY * (width / height), minimumSpan ?? 0) * ctx.settings.camera.ratioFactor,
   };
 }
 
@@ -80,7 +83,7 @@ export function focusNodes(ctx: CameraContext, nodes: string[], focused: string 
         bounds.maxY,
         nodes.length === 1 ? radiusOneMinimumSpan(ctx) : undefined,
       ),
-      { duration: 600 },
+      { duration: ctx.settings.camera.animationDurationMs },
     );
 }
 
@@ -94,7 +97,14 @@ export function fitVisibleNodes(ctx: CameraContext) {
 
 export function centerEmptyGraph(ctx: CameraContext, animate = true) {
   if (ctx.projection.visibleCount() !== 0) return;
-  const state = { x: 0.5, y: 0.5, ratio: radiusOneFocusRatio(ctx) };
-  if (animate) void ctx.renderer.getCamera().animate(state, { duration: 600 });
+  const state = {
+    x: ctx.settings.camera.defaultCenterX,
+    y: ctx.settings.camera.defaultCenterY,
+    ratio: radiusOneFocusRatio(ctx),
+  };
+  if (animate)
+    void ctx.renderer
+      .getCamera()
+      .animate(state, { duration: ctx.settings.camera.animationDurationMs });
   else ctx.renderer.getCamera().setState(state);
 }

@@ -10,6 +10,7 @@
 	import { focusPrimaryNeighborhood, fitVisibleNodes, centerEmptyGraph } from '#lib/graph/graph-camera.ts';
 	import { patchLabelGridQuery } from '#lib/graph/label-grid.ts';
 	import type Sigma from 'sigma';
+	import { defaultGraphSettings, mergeSettings, type GraphSettings } from '#lib/config/graph-settings.ts';
 
 	interface PerformanceSnapshot {
 		profile: string;
@@ -77,14 +78,22 @@
 	let hasMoreNodes = $state(false);
 	let addNode = $state<(() => void) | undefined>(undefined);
 	let repeatingNodes = $state(false);
-	let nodesPerSecond = $state(10);
+	let nodesPerSecond = $state(defaultGraphSettings.layout.nodesPerSecond);
 	let toggleRepeatingNodes = $state<(() => void) | undefined>(undefined);
 	let setNodesPerSecond = $state<((value: number) => void) | undefined>(undefined);
+	let graphSettings = $state<GraphSettings>(defaultGraphSettings);
+	function updateGraphSettings(partial: Partial<GraphSettings>) {
+		if (partial.layout?.nodesPerSecond) nodesPerSecond = partial.layout.nodesPerSecond;
+		graphSettings = mergeSettings(graphSettings, partial);
+		updateRenderingStylesCallback?.();
+	}
+
 	let fa2Settings = $state<ForceAtlas2Settings>(defaultForceAtlas2Settings);
 	let updateFa2Settings = $state<(<Key extends keyof ForceAtlas2Settings>(key: Key, value: ForceAtlas2Settings[Key]) => void)>(() => {});
 	let statusShort = $derived(status === 'ready' ? 'ready' : status === 'dataset failed to load' ? 'data failed' : 'loading');
 
 	let destroyRenderer: (() => void) | undefined;
+	let updateRenderingStylesCallback: (() => void) | undefined;
 	let primaryNode = $state<string | null>(null);
 	let secondaryNode = $state<string | null>(null);
 	let graphOpen = $state(true);
@@ -118,11 +127,11 @@
 		};
 		const searchParameters = new URLSearchParams(window.location.search);
 		const performanceProfile = searchParameters.get('performance') ?? 'baseline';
-		const edgeOpacity = performanceProfile === 'opaque' ? 1 : 0.3;
+		const edgeOpacity = performanceProfile === 'opaque' ? defaultGraphSettings.rendering.edgeOpacityOpaque : defaultGraphSettings.rendering.edgeOpacity;
 		const edgeColor = performanceProfile === 'opaque' ? '#424245' : '#646262';
 		const antialiasEdges = performanceProfile !== 'aliased';
 		const enableEdgeEvents = performanceProfile === 'edge-events';
-		const pickingDownSizingRatio = performanceProfile === 'coarse-picking' ? 4 : 2;
+		const pickingDownSizingRatio = performanceProfile === 'coarse-picking' ? defaultGraphSettings.rendering.pickingDownSizingRatioCoarse : defaultGraphSettings.rendering.pickingDownSizingRatioNormal;
 		const diagnostics = new Set(
 			searchParameters.has('perf') ? (searchParameters.get('perf') || 'timers,stats').split(',') : []
 		);
@@ -216,27 +225,27 @@
 						label: { attribute: 'label' },
 						labelColor: '#fdfcfc',
 						labelFont: 'Berkeley Mono, JetBrains Mono, IBM Plex Mono, ui-monospace, monospace',
-						labelSize: 12,
+						labelSize: { attribute: 'labelFontSize' },
 						labelPosition: 'right',
 						labelBackgroundColor: '#201d1d',
-						labelBackgroundPadding: 4,
+						labelBackgroundPadding: { attribute: 'labelBackgroundPadding' },
 						labelDepth: 'topNodes',
 						labelVisibility: 'hidden',
 						labelCursor: 'pointer',
 					},
 					{
 						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: { hasActiveSubgraph: boolean }) => graphState.hasActiveSubgraph && !state.isActive && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: 0.12 },
+						then: { color: '#424245', label: '', opacity: { attribute: 'nodeInactiveOpacity' } },
 					},
 					{
 						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean; isPrimary: boolean; isSecondary: boolean }, graphState: { hasSelectedPair: boolean }) =>
 							graphState.hasSelectedPair && state.isActive && !state.isPrimary && !state.isSecondary && !state.isHovered && !state.isLabelHovered,
-						then: { label: '', opacity: 0.3 },
+						then: { label: '', opacity: { attribute: 'nodeActiveOpacity' } },
 					},
 					{
 						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: { hasSelectedPair: boolean }) =>
 							graphState.hasSelectedPair && !state.isActive && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: 0.12 },
+						then: { color: '#424245', label: '', opacity: { attribute: 'nodePairInactiveOpacity' } },
 					},
 					{
 						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasPrimarySelection: boolean }) =>
@@ -249,14 +258,14 @@
 							backdropVisibility: 'visible',
 							labelVisibility: 'visible',
 							backdropColor: '#201d1d',
-							backdropPadding: 8,
-							backdropCornerRadius: 4,
+							backdropPadding: { attribute: 'backdropPadding' },
+							backdropCornerRadius: { attribute: 'backdropCornerRadius' },
 							backdropBorderColor: {
 								attribute: 'color',
 							},
-							backdropBorderWidth: 1,
+							backdropBorderWidth: { attribute: 'backdropBorderWidth' },
 							backdropShadowColor: 'transparent',
-							backdropShadowBlur: 0,
+							backdropShadowBlur: { attribute: 'backdropShadowBlur' },
 							backdropArea: 'both',
 						},
 					},
@@ -266,12 +275,12 @@
 							backdropVisibility: 'visible',
 							labelVisibility: 'visible',
 							backdropColor: '#201d1d',
-							backdropPadding: 8,
-							backdropCornerRadius: 4,
+							backdropPadding: { attribute: 'backdropPadding' },
+							backdropCornerRadius: { attribute: 'backdropCornerRadius' },
 							backdropBorderColor: { attribute: 'color' },
-							backdropBorderWidth: 1,
+							backdropBorderWidth: { attribute: 'backdropBorderWidth' },
 							backdropShadowColor: 'transparent',
-							backdropShadowBlur: 0,
+							backdropShadowBlur: { attribute: 'backdropShadowBlur' },
 							backdropArea: 'both',
 						},
 					},
@@ -298,10 +307,10 @@
 				],
 				edges: [
 					DEPTHLESS_STYLES.edges,
-					{ color: edgeColor, opacity: edgeOpacity, size: 1, path: 'line' },
+					{ color: edgeColor, opacity: { attribute: 'edgeOpacity' }, size: 1, path: 'line' },
 					{
 						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasActiveSubgraph: boolean }) => graphState.hasActiveSubgraph && !state.isActive,
-						then: { color: '#424245', opacity: 0.05 },
+						then: { color: '#424245', opacity: { attribute: 'edgeInactiveOpacity' } },
 					},
 					{
 						whenState: 'isPrimaryEdge',
@@ -319,10 +328,12 @@
 			},
 		});
 		patchLabelGridQuery(renderer);
+		updateRenderingStyles();
 		const cameraCtx = {
 			renderer: renderer as Sigma,
 			graph,
 			projection,
+			get settings() { return graphSettings; },
 			getFocusedNode: () => focusedNode,
 			setFocusedNode: (n: string | null) => { focusedNode = n; },
 		};
@@ -396,6 +407,29 @@
 			renderer.refresh();
 		}
 
+		function updateRenderingStyles() {
+			const r = graphSettings.rendering;
+			graph.forEachNode((node) => {
+				graph.setNodeAttribute(node, 'nodeInactiveOpacity', r.nodeInactiveOpacity);
+				graph.setNodeAttribute(node, 'nodeActiveOpacity', r.nodeActiveOpacity);
+				graph.setNodeAttribute(node, 'nodePairInactiveOpacity', r.nodePairInactiveOpacity);
+				graph.setNodeAttribute(node, 'labelFontSize', r.labelFontSize);
+				graph.setNodeAttribute(node, 'labelBackgroundPadding', r.labelBackgroundPadding);
+				graph.setNodeAttribute(node, 'backdropPadding', r.backdropPadding);
+				graph.setNodeAttribute(node, 'backdropCornerRadius', r.backdropCornerRadius);
+				graph.setNodeAttribute(node, 'backdropBorderWidth', r.backdropBorderWidth);
+				graph.setNodeAttribute(node, 'backdropShadowBlur', r.backdropShadowBlur);
+			});
+			graph.forEachEdge((edge) => {
+				graph.setEdgeAttribute(edge, 'edgeOpacity', r.edgeOpacity);
+				graph.setEdgeAttribute(edge, 'edgeInactiveOpacity', r.edgeInactiveOpacity);
+			});
+			const pickingRatio = performanceProfile === 'coarse-picking' ? r.pickingDownSizingRatioCoarse : r.pickingDownSizingRatioNormal;
+			renderer.setSetting('pickingDownSizingRatio', pickingRatio);
+			renderer.scheduleRefresh();
+		}
+		updateRenderingStylesCallback = updateRenderingStyles;
+
 		function selectPrimaryNode(node: string) {
 			primaryNode = node;
 			secondaryNode = null;
@@ -455,7 +489,7 @@
 		function animateNodePop(indices: number[]) {
 			const startedAt = performance.now();
 			const frame = (now: number) => {
-				const progress = Math.min(1, (now - startedAt) / 180);
+				const progress = Math.min(1, (now - startedAt) / graphSettings.layout.popAnimationDurationMs);
 				projection.setPopScale(indices, progress * progress * (3 - 2 * progress));
 				if (progress < 1) {
 					const nextFrame = requestAnimationFrame(frame);
@@ -470,8 +504,8 @@
 			const index = model.nodesByDescendingDegree[nextNodeOffset];
 			if (index === undefined) return;
 			projection.applyDelta({ activate: [index] }, 1, true);
-			const angle = index * 2.399963229728653;
-			projection.setPosition(index, Math.cos(angle) * 0.001, Math.sin(angle) * 0.001);
+			const angle = index * graphSettings.layout.goldenAngle;
+			projection.setPosition(index, Math.cos(angle) * graphSettings.layout.initialPositionOffset, Math.sin(angle) * graphSettings.layout.initialPositionOffset);
 			scheduleVisibleSizeRescale();
 			scheduleGridRedraw();
 			nextNodeOffset += 1;
@@ -492,8 +526,6 @@
 			repeatingNodes = false;
 		}
 
-		const ADD_NODES_CADENCE_MS = 100;
-
 		function addNodesBatch() {
 			if (!repeatingNodes) return;
 			const now = performance.now();
@@ -508,6 +540,8 @@
 				addNextNodeByDegree();
 			}
 		}
+
+		const ADD_NODES_CADENCE_MS = 100;
 
 		function startRepeatingNodes() {
 			if (!hasMoreNodes) return;
@@ -544,13 +578,13 @@
 			const firstBatchStart = performance.now();
 			const revealNextBatch = () => {
 				if (run !== revealRun) return;
-				const batch = Array.from(model.nodesByDescendingScore.slice(offset, offset + 32)) as number[];
+				const batch = Array.from(model.nodesByDescendingScore.slice(offset, offset + graphSettings.layout.revealBatchSize)) as number[];
 			if (!batch.length) {
 					scheduleGridRedraw();
 					renderer.refresh();
 					return;
 				}
-				projection.applyDelta({ activate: batch }, 0.01);
+				projection.applyDelta({ activate: batch }, graphSettings.layout.revealInitialScale);
 				scheduleVisibleSizeRescale();
 				scheduleGridRedraw();
 				animateNodePop(batch);
@@ -558,7 +592,7 @@
 				edgeCount = graph.size;
 				offset += batch.length;
 				if (offset === batch.length) revealTrace.push({ phase: 'firstBatch', ms: Math.round(performance.now() - firstBatchStart) });
-				revealTimer = window.setTimeout(revealNextBatch, 28);
+				revealTimer = window.setTimeout(revealNextBatch, graphSettings.layout.revealTimeoutMs);
 			};
 			revealNextBatch();
 		}
@@ -793,6 +827,6 @@
 		</footer>
 	</WorkspacePanel>
 	<WorkspacePanel as="aside" label="Graph controls" open={controlsOpen}>
-		<GraphViewerControls open={controlsOpen} onToggle={() => togglePanel('controls')} {loaded} {hasMoreNodes} onAddNode={addNode} repeating={repeatingNodes} {nodesPerSecond} onToggleRepeating={toggleRepeatingNodes} onNodesPerSecondChange={setNodesPerSecond} settings={fa2Settings} onSettingsChange={updateFa2Settings} />
+		<GraphViewerControls open={controlsOpen} onToggle={() => togglePanel('controls')} {loaded} {hasMoreNodes} onAddNode={addNode} repeating={repeatingNodes} {nodesPerSecond} onToggleRepeating={toggleRepeatingNodes} onNodesPerSecondChange={setNodesPerSecond} settings={fa2Settings} onSettingsChange={updateFa2Settings} graphSettings={graphSettings} onGraphSettingsChange={updateGraphSettings} />
 	</WorkspacePanel>
 </div>

@@ -37,7 +37,7 @@
 	}
 </script>
 
-<div class="relative z-10 flex lg:flex-col" role="tablist" aria-label="Graph control categories">
+<div class="relative z-10 flex lg:flex-col pointer-events-none lg:max-h-[300px] lg:overflow-y-auto" role="tablist" aria-label="Graph control categories">
 	{#each tabs as tab (tab.id)}
 		<button
 			bind:this={tabButtons[tab.id]}
@@ -49,7 +49,7 @@
 			tabindex={activeId === tab.id ? 0 : -1}
 			class:!border-ink={open && activeId === tab.id}
 			class:!text-ink={open && activeId === tab.id}
-			class="h-9 cursor-pointer border-b-2 border-transparent px-sm text-left text-caption text-mute hover:bg-surface-card hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px lg:h-auto lg:w-full lg:border-r-2 lg:border-b-0 lg:[writing-mode:vertical-rl]"
+			class="pointer-events-auto h-9 cursor-pointer border-b-2 border-transparent px-sm text-left text-caption text-mute hover:bg-surface-card hover:text-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent active:translate-y-px lg:h-auto lg:w-full lg:border-r-2 lg:border-b-0 lg:[writing-mode:vertical-rl]"
 			onclick={() => onTabClick(tab.id)}
 			onkeydown={(event) => handleKeydown(event, tab)}
 		>
