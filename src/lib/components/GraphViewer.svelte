@@ -143,6 +143,27 @@
 			import('sigma/rendering')
 		]);
 
+		// Type for custom graph state
+		type CustomGraphState = {
+			hasActiveSubgraph: boolean;
+			hasPrimarySelection: boolean;
+			hasSelectedPair: boolean;
+			nodeInactiveOpacity: number;
+			nodeActiveOpacity: number;
+			nodePairInactiveOpacity: number;
+			edgeOpacity: number;
+			edgeInactiveOpacity: number;
+			edgePairInactiveOpacity: number;
+			labelFontSize: number;
+			labelBackgroundPadding: number;
+			backdropPadding: number;
+			backdropCornerRadius: number;
+			backdropBorderWidth: number;
+			backdropShadowBlur: number;
+		};
+		type CustomNodeState = { isActive: boolean; isPrimary: boolean; isSecondary: boolean; isHovered: boolean; isLabelHovered: boolean };
+		type CustomEdgeState = { isActive: boolean; isPrimaryEdge: boolean; isSelected: boolean };
+
 		let dataset: GraphDataset;
 		try {
 			const response = await fetch('/wikipedia.json');
@@ -175,19 +196,38 @@
 			projection.rescaleVisibleSizes();
 		}
 
-		const renderer = new Sigma(graph, graphContainer, {
-			settings: {
-				autoRescale: false,
-				itemSizesReference: 'positions',
-				nodeLabelEvents: 'extend',
-				antialiasEdges,
-				enableEdgeEvents,
-				pickingDownSizingRatio,
-				zoomToSizeRatioFunction: (ratio) => ratio,
-			},
-			customNodeState: { isActive: false, isPrimary: false, isSecondary: false },
-			customEdgeState: { isActive: false, isPrimaryEdge: false, isSelected: false },
-			customGraphState: { hasActiveSubgraph: false, hasPrimarySelection: false, hasSelectedPair: false },
+		const renderer = new Sigma(
+			graph as any,
+			graphContainer,
+			{
+				settings: {
+					autoRescale: false,
+					itemSizesReference: 'positions',
+					nodeLabelEvents: 'extend',
+					antialiasEdges,
+					enableEdgeEvents,
+					pickingDownSizingRatio,
+					zoomToSizeRatioFunction: (ratio) => ratio,
+				},
+				customNodeState: { isActive: false, isPrimary: false, isSecondary: false, isHovered: false, isLabelHovered: false } as any,
+				customEdgeState: { isActive: false, isPrimaryEdge: false, isSelected: false } as any,
+				customGraphState: {
+					hasActiveSubgraph: false,
+					hasPrimarySelection: false,
+					hasSelectedPair: false,
+					nodeInactiveOpacity: 0.12,
+					nodeActiveOpacity: 0.3,
+					nodePairInactiveOpacity: 0.12,
+					edgeOpacity: 0.3,
+					edgeInactiveOpacity: 0.05,
+					edgePairInactiveOpacity: 0.05,
+					labelFontSize: 12,
+					labelBackgroundPadding: 4,
+					backdropPadding: 8,
+					backdropCornerRadius: 4,
+					backdropBorderWidth: 1,
+					backdropShadowBlur: 0,
+				},
 			primitives: {
 				depthLayers: [
 					'edges',
@@ -234,21 +274,25 @@
 						labelCursor: 'pointer',
 					},
 					{
-						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: { hasActiveSubgraph: boolean }) => graphState.hasActiveSubgraph && !state.isActive && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: { attribute: 'nodeInactiveOpacity' } },
+						// @ts-ignore - custom node state types
+						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: any) => graphState.hasActiveSubgraph && !state.isActive && !state.isHovered && !state.isLabelHovered,
+						then: { color: '#424245', label: '', opacity: (_, __, graphState: any) => graphState.nodeInactiveOpacity },
 					},
 					{
-						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean; isPrimary: boolean; isSecondary: boolean }, graphState: { hasSelectedPair: boolean }) =>
+						// @ts-ignore - custom node state types
+						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean; isPrimary: boolean; isSecondary: boolean }, graphState: any) =>
+							graphState.hasPrimarySelection && !graphState.hasSelectedPair && state.isActive && !state.isPrimary && !state.isSecondary && !state.isHovered && !state.isLabelHovered,
+						then: { label: '', opacity: (_, __, graphState: any) => graphState.nodeActiveOpacity },
+					},
+					{
+						// @ts-ignore - custom node state types
+						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean; isPrimary: boolean; isSecondary: boolean }, graphState: any) =>
 							graphState.hasSelectedPair && state.isActive && !state.isPrimary && !state.isSecondary && !state.isHovered && !state.isLabelHovered,
-						then: { label: '', opacity: { attribute: 'nodeActiveOpacity' } },
+						then: { color: '#424245', label: '', opacity: (_, ___, graphState: any) => graphState.nodePairInactiveOpacity },
 					},
 					{
-						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: { hasSelectedPair: boolean }) =>
-							graphState.hasSelectedPair && !state.isActive && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: { attribute: 'nodePairInactiveOpacity' } },
-					},
-					{
-						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasPrimarySelection: boolean }) =>
+						// @ts-ignore - custom node state types
+						when: (_attrs: unknown, state: { isActive: boolean }, graphState: any) =>
 							graphState.hasPrimarySelection && state.isActive,
 						then: { label: { attribute: 'label' }, labelVisibility: 'auto' },
 					},
@@ -285,14 +329,17 @@
 						},
 					},
 					{
+						// @ts-ignore - custom node state types
 						whenState: 'isActive',
 						then: { depth: 'activeNodes' },
 					},
 					{
+						// @ts-ignore - custom node state types
 						whenState: 'isPrimary',
 						then: { depth: 'topNodes' },
 					},
 					{
+						// @ts-ignore - custom node state types
 						whenState: 'isSecondary',
 						then: { depth: 'topNodes' },
 					},
@@ -307,22 +354,32 @@
 				],
 				edges: [
 					DEPTHLESS_STYLES.edges,
-					{ color: edgeColor, opacity: { attribute: 'edgeOpacity' }, size: 1, path: 'line' },
+					{ color: edgeColor, opacity: (_, __, graphState: any) => graphState.edgeOpacity, size: 1, path: 'line' },
 					{
-						when: (_attrs: unknown, state: { isActive: boolean }, graphState: { hasActiveSubgraph: boolean }) => graphState.hasActiveSubgraph && !state.isActive,
-						then: { color: '#424245', opacity: { attribute: 'edgeInactiveOpacity' } },
+						// @ts-ignore - custom edge state types
+						when: (_attrs: unknown, state: { isActive: boolean }, graphState: any) => graphState.hasActiveSubgraph && !state.isActive,
+						then: { color: '#424245', opacity: (_, __, graphState: any) => graphState.edgeInactiveOpacity },
 					},
 					{
+						// @ts-ignore - custom edge state types
 						whenState: 'isPrimaryEdge',
 						then: { opacity: 0.3, depth: 'activeEdges' },
 					},
 					{
+						// @ts-ignore - custom edge state types
 						whenState: 'isActive',
 						then: { opacity: 1, depth: 'activeEdges' },
 					},
 					{
+						// @ts-ignore - custom edge state types
 						whenState: 'isSelected',
 						then: { opacity: 1, depth: 'activeEdges' },
+					},
+					{
+						// @ts-ignore - custom edge state types
+						when: (_attrs: unknown, state: { isActive: boolean; isPrimaryEdge: boolean; isSelected: boolean }, graphState: any) =>
+							graphState.hasSelectedPair && state.isPrimaryEdge && !state.isSelected,
+						then: { color: '#424245', opacity: (_, __, graphState: any) => graphState.edgePairInactiveOpacity },
 					},
 				],
 			},
@@ -387,7 +444,7 @@
 			const hasSelectedPair = !!primaryNode && !!secondaryNode;
 
 			graph.forEachNode((node) => {
-				renderer.setNodeState(node, {
+				(renderer as any).setNodeState(node, {
 					isActive: activeNodes?.has(node),
 					isPrimary: node === primaryNode,
 					isSecondary: node === secondaryNode,
@@ -399,30 +456,33 @@
 				const isSelected = hasSelectedPair && ((source === primaryNode && target === secondaryNode) || (source === secondaryNode && target === primaryNode));
 				const isPrimaryEdge = hasSelectedPair && (source === primaryNode || target === primaryNode);
 				const isActive = hasSelectedPair ? isSelected : source === (primaryNode ?? hoveredNode) || target === (primaryNode ?? hoveredNode);
-				renderer.setEdgeState(edge, { isActive, isPrimaryEdge, isSelected });
+				(renderer as any).setEdgeState(edge, { isActive, isPrimaryEdge, isSelected });
 				graph.setEdgeAttribute(edge, 'useGradient', hasSelectedPair ? isPrimaryEdge : isActive);
 			});
 
-			renderer.setGraphState({ hasActiveSubgraph: !!activeNodes, hasPrimarySelection: !!primaryNode, hasSelectedPair });
+			(renderer as any).setGraphState({ hasActiveSubgraph: !!activeNodes, hasPrimarySelection: !!primaryNode, hasSelectedPair });
 			renderer.refresh();
 		}
 
 		function updateRenderingStyles() {
 			const r = graphSettings.rendering;
-			graph.forEachNode((node) => {
-				graph.setNodeAttribute(node, 'nodeInactiveOpacity', r.nodeInactiveOpacity);
-				graph.setNodeAttribute(node, 'nodeActiveOpacity', r.nodeActiveOpacity);
-				graph.setNodeAttribute(node, 'nodePairInactiveOpacity', r.nodePairInactiveOpacity);
-				graph.setNodeAttribute(node, 'labelFontSize', r.labelFontSize);
-				graph.setNodeAttribute(node, 'labelBackgroundPadding', r.labelBackgroundPadding);
-				graph.setNodeAttribute(node, 'backdropPadding', r.backdropPadding);
-				graph.setNodeAttribute(node, 'backdropCornerRadius', r.backdropCornerRadius);
-				graph.setNodeAttribute(node, 'backdropBorderWidth', r.backdropBorderWidth);
-				graph.setNodeAttribute(node, 'backdropShadowBlur', r.backdropShadowBlur);
-			});
-			graph.forEachEdge((edge) => {
-				graph.setEdgeAttribute(edge, 'edgeOpacity', r.edgeOpacity);
-				graph.setEdgeAttribute(edge, 'edgeInactiveOpacity', r.edgeInactiveOpacity);
+			const hasActiveSubgraph = !!primaryNode;
+			(renderer as any).setGraphState({
+				hasActiveSubgraph,
+				hasPrimarySelection: !!primaryNode,
+				hasSelectedPair: !!primaryNode && !!secondaryNode,
+				nodeInactiveOpacity: r.nodeInactiveOpacity,
+				nodeActiveOpacity: r.nodeActiveOpacity,
+				nodePairInactiveOpacity: r.nodePairInactiveOpacity,
+				edgeOpacity: r.edgeOpacity,
+				edgeInactiveOpacity: r.edgeInactiveOpacity,
+				edgePairInactiveOpacity: r.edgePairInactiveOpacity,
+				labelFontSize: r.labelFontSize,
+				labelBackgroundPadding: r.labelBackgroundPadding,
+				backdropPadding: r.backdropPadding,
+				backdropCornerRadius: r.backdropCornerRadius,
+				backdropBorderWidth: r.backdropBorderWidth,
+				backdropShadowBlur: r.backdropShadowBlur,
 			});
 			const pickingRatio = performanceProfile === 'coarse-picking' ? r.pickingDownSizingRatioCoarse : r.pickingDownSizingRatioNormal;
 			renderer.setSetting('pickingDownSizingRatio', pickingRatio);

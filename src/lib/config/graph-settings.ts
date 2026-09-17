@@ -55,6 +55,8 @@ export interface RenderingSettings {
   edgeOpacity: number;
   /** Edge opacity — opaque performance profile. Default: 1 */
   edgeOpacityOpaque: number;
+  /** Edge opacity — non-active edges when a pair is selected. Default: 0.05 */
+  edgePairInactiveOpacity: number;
   /** Node label font size (px). Default: 12 */
   labelFontSize: number;
   /** Label background padding (px). Default: 4 */
@@ -122,6 +124,7 @@ export const defaultGraphSettings: GraphSettings = {
     edgeInactiveOpacity: 0.05,
     edgeOpacity: 0.3,
     edgeOpacityOpaque: 1,
+    edgePairInactiveOpacity: 0.05,
     labelFontSize: 12,
     labelBackgroundPadding: 4,
     backdropPadding: 8,

@@ -99,3 +99,5 @@ For a GPU performance conclusion, use Chrome DevTools. Open `/?perf=timers`, the
 Do not change the package manager or dependency versions without a task that requires it. Do not edit `public/wikipedia.json` unless the task changes the graph dataset.
 
 Do not commit secrets or `.env` files. The current adapter is `@sveltejs/adapter-auto`; select a deployment adapter only when the deployment target is known.
+
+Only run playwright tests after you have confirmed that that the change is verified in the chrome devtools browser or there is an error. DO NOT RUN ANY PLAYWRIGHT TESTS IF YOU HAVEN'T VERIFIED THE CHANGE WITH CHROME DEVTOOLS
