@@ -5,14 +5,11 @@
 	import PanelBar from '#lib/components/PanelBar.svelte';
 	import WorkspacePanel from '#lib/components/WorkspacePanel.svelte';
 	import { defaultForceAtlas2Settings, ForceAtlas2Layout, type ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
-	import { createGraphModel } from '#lib/graph/graph-model.ts';
+	import { createGraphModel, type GraphDataset } from '#lib/graph/graph-model.ts';
 	import { GraphProjection } from '#lib/graph/graph-projection.ts';
-
-	interface Dataset {
-		nodes: { key: string; label: string; tag: string; cluster: string; x: number; y: number; score: number }[];
-		edges: [string, string][];
-		clusters: { key: string; color: string; clusterLabel: string }[];
-	}
+	import { focusPrimaryNeighborhood, fitVisibleNodes, centerEmptyGraph } from '#lib/graph/graph-camera.ts';
+	import { patchLabelGridQuery } from '#lib/graph/label-grid.ts';
+	import type Sigma from 'sigma';
 
 	interface PerformanceSnapshot {
 		profile: string;
@@ -71,50 +68,6 @@
 	}
 
 	type Coordinates = { x: number; y: number };
-
-	interface LabelGridLike {
-		cellSize: number;
-		columns: number;
-		rows: number;
-		cells: Record<number, { key: string; size: number }[]>;
-		getLabelsToDisplay: (ratio: number, density: number, viewport?: { x1: number; y1: number; x2: number; y2: number }) => string[];
-	}
-
-	function patchLabelGridQuery(renderer: unknown) {
-		const labelGrid = (renderer as { labelRenderer: { labelGrid: LabelGridLike } }).labelRenderer.labelGrid;
-		// Sigma recreates the LabelGrid on every full refresh (clearNodeIndices ->
-		// resetLabelGrid), so an instance patch is discarded. Patch the shared
-		// prototype instead. Get all labels to display from the grid, without the
-		// row/column clamp that hides nodes stored in negative cell coordinates.
-		const prototype = Object.getPrototypeOf(labelGrid) as { getLabelsToDisplay: LabelGridLike['getLabelsToDisplay'] };
-		prototype.getLabelsToDisplay = function (this: LabelGridLike, ratio, density, viewport) {
-			const labelsToDisplayPerCell = Math.ceil(density / (ratio * ratio));
-			const labels: string[] = [];
-			if (viewport) {
-				const minRow = Math.floor(viewport.y1 / this.cellSize);
-				const maxRow = Math.floor(viewport.y2 / this.cellSize);
-				const minCol = Math.floor(viewport.x1 / this.cellSize);
-				const maxCol = Math.floor(viewport.x2 / this.cellSize);
-				for (let row = minRow; row <= maxRow; row += 1) {
-					for (let col = minCol; col <= maxCol; col += 1) {
-						const cell = this.cells[row * this.columns + col];
-						if (!cell) continue;
-						for (let i = 0; i < Math.min(labelsToDisplayPerCell, cell.length); i += 1) {
-							labels.push(cell[i].key);
-						}
-					}
-				}
-			} else {
-				for (const key in this.cells) {
-					const cell = this.cells[Number(key)];
-					for (let i = 0; i < Math.min(labelsToDisplayPerCell, cell.length); i += 1) {
-						labels.push(cell[i].key);
-					}
-				}
-			}
-			return labels;
-		};
-	}
 
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
@@ -181,7 +134,7 @@
 			import('sigma/rendering')
 		]);
 
-		let dataset: Dataset;
+		let dataset: GraphDataset;
 		try {
 			const response = await fetch('/wikipedia.json');
 			if (!response.ok) throw new Error('dataset request failed');
@@ -366,6 +319,13 @@
 			},
 		});
 		patchLabelGridQuery(renderer);
+		const cameraCtx = {
+			renderer: renderer as Sigma,
+			graph,
+			projection,
+			getFocusedNode: () => focusedNode,
+			setFocusedNode: (n: string | null) => { focusedNode = n; },
+		};
 		let gridFrame: number | undefined;
 		let sizeFrame: number | undefined;
 		function scheduleGridRedraw() {
@@ -407,62 +367,6 @@
 
 		let focusedNode: string | null = null;
 
-		const RADIUS_ONE_SCREEN_PX = 24;
-		function radiusOneFocusRatio() {
-			const { width, height } = renderer.getDimensions();
-			return Math.min(width, height) / (Math.max(width, height) * RADIUS_ONE_SCREEN_PX);
-		}
-		function radiusOneMinimumSpan() {
-			return radiusOneFocusRatio() / 1.2;
-		}
-
-		function focusGraphBounds(minX: number, maxX: number, minY: number, maxY: number, minimumSpan?: number) {
-			const normalize = renderer.getNormalizationFunction();
-			const { width, height } = renderer.getDimensions();
-			const minimum = normalize({ x: minX, y: minY });
-			const maximum = normalize({ x: maxX, y: maxY });
-			const minFramedX = Math.min(minimum.x, maximum.x);
-			const maxFramedX = Math.max(minimum.x, maximum.x);
-			const minFramedY = Math.min(minimum.y, maximum.y);
-			const maxFramedY = Math.max(minimum.y, maximum.y);
-			const spanX = maxFramedX - minFramedX;
-			const spanY = maxFramedY - minFramedY;
-			return {
-				x: (minFramedX + maxFramedX) / 2,
-				y: (minFramedY + maxFramedY) / 2,
-				ratio: Math.max(spanX, spanY * (width / height), minimumSpan ?? 0) * 1.2,
-			};
-		}
-
-		function focusNodes(nodes: string[], focused: string | null) {
-			focusedNode = focused;
-			const bounds = nodes.reduce(
-				(bounds, key) => {
-					const { x, y, size } = graph.getNodeAttributes(key);
-					const radius = size as number;
-					return {
-						minX: Math.min(bounds.minX, (x as number) - radius),
-						maxX: Math.max(bounds.maxX, (x as number) + radius),
-						minY: Math.min(bounds.minY, (y as number) - radius),
-						maxY: Math.max(bounds.maxY, (y as number) + radius)
-					};
-				},
-				{ minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
-			);
-			void renderer.getCamera().animate(
-				focusGraphBounds(bounds.minX, bounds.maxX, bounds.minY, bounds.maxY, nodes.length === 1 ? radiusOneMinimumSpan() : undefined),
-				{ duration: 600 }
-			);
-		}
-
-		function focusPrimaryNeighborhood(node: string) {
-			focusNodes([node, ...graph.neighbors(node)], node);
-		}
-
-		function fitVisibleNodes() {
-			focusNodes(graph.nodes(), null);
-		}
-
 		function updateGraphState(hoveredNode: string | null) {
 			const activeNodes = primaryNode
 				? new Set([primaryNode, ...graph.neighbors(primaryNode)])
@@ -496,7 +400,7 @@
 			primaryNode = node;
 			secondaryNode = null;
 			updateGraphState(null);
-			focusPrimaryNeighborhood(node);
+			focusPrimaryNeighborhood(cameraCtx, node);
 		}
 
 		function setGraphCursor(cursor: string) {
@@ -678,16 +582,10 @@
 			nextNodeOffset = 0;
 			nodeCount = 0;
 			edgeCount = 0;
-			centerEmptyGraph(false);
+			centerEmptyGraph(cameraCtx, false);
 			scheduleGridRedraw();
 		}
 
-		function centerEmptyGraph(animate = true) {
-			if (projection.visibleCount() !== 0) return;
-			const state = { x: 0.5, y: 0.5, ratio: radiusOneFocusRatio() };
-			if (animate) void renderer.getCamera().animate(state, { duration: 600 });
-			else renderer.getCamera().setState(state);
-		}
 
 	function selectionSnapshot(): SelectionSnapshot {
 			const { x, y, ratio } = renderer.getCamera().getState();
@@ -729,19 +627,19 @@
 	renderer.on('clickNode', ({ node }) => handleNodeClick(node));
 		renderer.on('doubleClickNode', ({ node, event }) => {
 			event.preventSigmaDefault();
-			focusPrimaryNeighborhood(node);
+			focusPrimaryNeighborhood(cameraCtx, node);
 		});
 		renderer.on('doubleClickNodeLabel', ({ node, event }) => {
 			event.preventSigmaDefault();
-			focusPrimaryNeighborhood(node);
+			focusPrimaryNeighborhood(cameraCtx, node);
 		});
 		renderer.on('clickStage', () => {
 			clearSelection();
 		});
 		renderer.on('doubleClickStage', ({ event }) => {
 			event.preventSigmaDefault();
-			if (projection.visibleCount() === 0) centerEmptyGraph();
-			else fitVisibleNodes();
+			if (projection.visibleCount() === 0) centerEmptyGraph(cameraCtx);
+			else fitVisibleNodes(cameraCtx);
 		});
 
 		if (hasDiagnostic('timers')) {
@@ -767,7 +665,7 @@
 			performanceWindow.rugbyGraphSelectionTest = {
 				candidates: selectionCandidates,
 				clickNode: handleNodeClick,
-				doubleClickNode: focusPrimaryNeighborhood,
+				doubleClickNode: (node) => focusPrimaryNeighborhood(cameraCtx, node),
 				clickStage: clearSelection,
 				snapshot: selectionSnapshot,
 				setCamera: (state) => renderer.getCamera().setState(state),
@@ -838,7 +736,7 @@
 				lastTrace: () => revealTrace,
 			};
 		}
-		centerEmptyGraph(false);
+		centerEmptyGraph(cameraCtx, false);
 		addNode = addNextNodeByDegree;
 		toggleRepeatingNodes = () => (repeatingNodes ? stopRepeatingNodes() : startRepeatingNodes());
 		setNodesPerSecond = updateNodesPerSecond;
