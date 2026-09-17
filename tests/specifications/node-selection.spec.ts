@@ -23,6 +23,9 @@ interface SelectionTestController {
   doubleClickNode: (node: string) => void;
   clickStage: () => void;
   snapshot: () => SelectionSnapshot;
+  setCamera: (state: { x: number; y: number; ratio: number }) => void;
+  nodePosition: (node: string) => { x: number; y: number };
+  displayedLabels: () => string[];
 }
 
 declare global {
@@ -122,6 +125,32 @@ test("OpenSpec node-selection: clicking a node fits its neighborhood", async ({ 
   expect(snapshot.focusedNode).toBe("covariant derivative");
   expect(snapshot.camera).not.toEqual(before.camera);
   expect(snapshot.camera.ratio).toBeGreaterThan(0);
+});
+
+test("OpenSpec node-selection: deep zooming onto an active node displays its label", async ({
+  page,
+}) => {
+  await openSelectionHarness(page);
+
+  // The user repro: select "data mining", then zoom onto the active node
+  // "intention mining". Its label must appear at deep zoom (regression for
+  // labels hidden in negative label-grid cells).
+  await clickNode(page, "data mining");
+  // The click fits the neighborhood; let that animation settle before zooming.
+  await page.waitForTimeout(750);
+  const position = await page.evaluate(() => {
+    const { x, y } = window.rugbyGraphSelectionTest!.nodePosition("intention mining");
+    return { x, y };
+  });
+  await page.evaluate((pos) => {
+    window.rugbyGraphSelectionTest!.setCamera({ x: pos.x, y: pos.y, ratio: 0.05 });
+  }, position);
+  await page.waitForTimeout(700);
+
+  const labels = await page.evaluate(
+    () => window.rugbyGraphSelectionTest!.displayedLabels() as string[],
+  );
+  expect(labels).toContain("intention mining");
 });
 
 test("OpenSpec node-selection: hover styles retain labels and backdrops", async () => {

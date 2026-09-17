@@ -45,6 +45,8 @@ just verify              # Run type checks, Oxlint, formatting, and build
 
 `scripts/dev-server.sh` manages the background Vite process. It stores the process ID and log in `.agent/`.
 
+DO NOT DEBUG WITH SCREENSHOTS
+
 ## Code Layout
 
 - `src/routes/+page.svelte` mounts the application page.

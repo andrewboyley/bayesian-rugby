@@ -40,6 +40,9 @@
 		doubleClickNode: (node: string) => void;
 		clickStage: () => void;
 		snapshot: () => SelectionSnapshot;
+		setCamera: (state: { x: number; y: number; ratio: number }) => void;
+		nodePosition: (node: string) => { x: number; y: number };
+		displayedLabels: () => string[];
 	}
 
 	interface ProjectionSnapshot {
@@ -68,6 +71,50 @@
 	}
 
 	type Coordinates = { x: number; y: number };
+
+	interface LabelGridLike {
+		cellSize: number;
+		columns: number;
+		rows: number;
+		cells: Record<number, { key: string; size: number }[]>;
+		getLabelsToDisplay: (ratio: number, density: number, viewport?: { x1: number; y1: number; x2: number; y2: number }) => string[];
+	}
+
+	function patchLabelGridQuery(renderer: unknown) {
+		const labelGrid = (renderer as { labelRenderer: { labelGrid: LabelGridLike } }).labelRenderer.labelGrid;
+		// Sigma recreates the LabelGrid on every full refresh (clearNodeIndices ->
+		// resetLabelGrid), so an instance patch is discarded. Patch the shared
+		// prototype instead. Get all labels to display from the grid, without the
+		// row/column clamp that hides nodes stored in negative cell coordinates.
+		const prototype = Object.getPrototypeOf(labelGrid) as { getLabelsToDisplay: LabelGridLike['getLabelsToDisplay'] };
+		prototype.getLabelsToDisplay = function (this: LabelGridLike, ratio, density, viewport) {
+			const labelsToDisplayPerCell = Math.ceil(density / (ratio * ratio));
+			const labels: string[] = [];
+			if (viewport) {
+				const minRow = Math.floor(viewport.y1 / this.cellSize);
+				const maxRow = Math.floor(viewport.y2 / this.cellSize);
+				const minCol = Math.floor(viewport.x1 / this.cellSize);
+				const maxCol = Math.floor(viewport.x2 / this.cellSize);
+				for (let row = minRow; row <= maxRow; row += 1) {
+					for (let col = minCol; col <= maxCol; col += 1) {
+						const cell = this.cells[row * this.columns + col];
+						if (!cell) continue;
+						for (let i = 0; i < Math.min(labelsToDisplayPerCell, cell.length); i += 1) {
+							labels.push(cell[i].key);
+						}
+					}
+				}
+			} else {
+				for (const key in this.cells) {
+					const cell = this.cells[Number(key)];
+					for (let i = 0; i < Math.min(labelsToDisplayPerCell, cell.length); i += 1) {
+						labels.push(cell[i].key);
+					}
+				}
+			}
+			return labels;
+		};
+	}
 
 	let container = $state<HTMLDivElement | null>(null);
 	let status = $state('loading dataset');
@@ -318,6 +365,7 @@
 				],
 			},
 		});
+		patchLabelGridQuery(renderer);
 		let gridFrame: number | undefined;
 		let sizeFrame: number | undefined;
 		function scheduleGridRedraw() {
@@ -716,12 +764,19 @@
 			};
 		}
 		if (searchParameters.get('test') === 'selection') {
-		performanceWindow.rugbyGraphSelectionTest = {
-			candidates: selectionCandidates,
-			clickNode: handleNodeClick,
-			doubleClickNode: focusPrimaryNeighborhood,
-			clickStage: clearSelection,
+			performanceWindow.rugbyGraphSelectionTest = {
+				candidates: selectionCandidates,
+				clickNode: handleNodeClick,
+				doubleClickNode: focusPrimaryNeighborhood,
+				clickStage: clearSelection,
 				snapshot: selectionSnapshot,
+				setCamera: (state) => renderer.getCamera().setState(state),
+				nodePosition: (node) => {
+					const { x, y } = graph.getNodeAttributes(node);
+					return renderer.getNormalizationFunction()({ x: x as number, y: y as number });
+				},
+				
+				displayedLabels: () => [...renderer.getNodeDisplayedLabels()],
 			};
 		}
 		if (searchParameters.get('test') === 'projection') {
