@@ -6,6 +6,8 @@ interface ProjectionSnapshot {
   visibleEdges: number;
   layoutRunning: boolean;
   layoutActiveNodes: number;
+  autoFit: boolean;
+  fitCount: number;
   camera: { x: number; y: number; ratio: number };
 }
 
@@ -21,6 +23,8 @@ interface ProjectionTestController {
   stopLayout: () => void;
   addNode: () => void;
   setCamera: (state: { x: number; y: number; ratio: number }) => void;
+  setAutoFit: (value: boolean) => void;
+  resetFitCount: () => void;
   snapshot: () => ProjectionSnapshot;
 }
 
@@ -119,6 +123,11 @@ test("OpenSpec graph-projection: adding the first node leaves the camera unchang
   page,
 }) => {
   await openProjectionHarness(page);
+  // Auto-fit is checked by default and would re-frame the camera for the
+  // first node; pin manual camera behavior for this test's premise.
+  await page.evaluate(() => {
+    window.rugbyGraphProjectionTest!.setAutoFit(false);
+  });
   const before = await snapshot(page);
 
   await page.evaluate(() => {
@@ -287,6 +296,15 @@ test("OpenSpec graph-projection: double-clicking the canvas fits every visible n
   expect(spread.distinct).toBe(6);
 
   const before = await snapshot(page);
+  const zoomedRatio = before.camera.ratio * 0.01;
+  // Auto-fit is checked by default, so the camera already frames every node.
+  // Zoom well away from that fit first so the double-click's immediate refit
+  // is observable; the camera change also disables auto-fit (manual behavior).
+  await page.evaluate((ratio) => {
+    window.rugbyGraphProjectionTest!.setCamera({ x: 0.5, y: 0.5, ratio });
+  }, zoomedRatio);
+  await expect.poll(async () => (await snapshot(page)).autoFit).toBe(false);
+
   const gridBox = await page.locator("#graph-grid").boundingBox();
   expect(gridBox).not.toBeNull();
   const clear = await page.evaluate(() => {
@@ -305,7 +323,8 @@ test("OpenSpec graph-projection: double-clicking the canvas fits every visible n
 
   await expect
     .poll(async () => (await snapshot(page)).camera.ratio)
-    .toBeGreaterThan(before.camera.ratio * 1.5);
+    .toBeGreaterThan(zoomedRatio * 1.5);
+  await expect.poll(async () => (await snapshot(page)).autoFit).toBe(true);
   await page.waitForTimeout(1200);
   await page.evaluate(() => {
     window.rugbyGraphProjectionTest!.stopLayout();
@@ -359,6 +378,19 @@ test("OpenSpec graph-projection: camera grid follows pan and recomputes on zoom"
   page,
 }) => {
   await openProjectionHarness(page);
+  // Auto-fit is checked by default and reframes the camera, shifting the grid
+  // origin away from the viewport center. Pin the classic default camera so
+  // this test's center-based grid expectations hold.
+  await page.evaluate(() => {
+    window.rugbyGraphProjectionTest!.setAutoFit(false);
+    window.rugbyGraphProjectionTest!.setCamera({ x: 0.5, y: 0.5, ratio: 1 });
+  });
+  await expect
+    .poll(async () => {
+      const grid = await gridSnapshot(page);
+      return Math.abs(grid.originX - grid.width / 2) + Math.abs(grid.originY - grid.height / 2);
+    })
+    .toBeLessThan(1);
 
   const initialGrid = await gridSnapshot(page);
   const initialCamera = (await snapshot(page)).camera;
@@ -396,6 +428,12 @@ test("OpenSpec graph-projection: mouse zoom keeps the initial origin under the c
   page,
 }) => {
   await openProjectionHarness(page);
+  // Auto-fit is checked by default and reframes the camera; pin the classic
+  // default camera so the zoom-origin expectations below hold.
+  await page.evaluate(() => {
+    window.rugbyGraphProjectionTest!.setAutoFit(false);
+    window.rugbyGraphProjectionTest!.setCamera({ x: 0.5, y: 0.5, ratio: 1 });
+  });
 
   const viewer = page.locator("#graph-viewer-panel");
   const viewerBox = await viewer.boundingBox();

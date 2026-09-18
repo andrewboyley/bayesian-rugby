@@ -57,8 +57,11 @@ export function focusGraphBounds(
   };
 }
 
-export function focusNodes(ctx: CameraContext, nodes: string[], focused: string | null) {
-  ctx.setFocusedNode(focused);
+function computeFocusState(
+  ctx: CameraContext,
+  nodes: string[],
+): { x: number; y: number; ratio: number } | null {
+  if (nodes.length === 0) return null;
   const bounds = nodes.reduce(
     (bounds, key) => {
       const { x, y, size } = ctx.graph.getNodeAttributes(key);
@@ -72,19 +75,29 @@ export function focusNodes(ctx: CameraContext, nodes: string[], focused: string 
     },
     { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity },
   );
+  return focusGraphBounds(
+    ctx,
+    bounds.minX,
+    bounds.maxX,
+    bounds.minY,
+    bounds.maxY,
+    nodes.length === 1 ? radiusOneMinimumSpan(ctx) : undefined,
+  );
+}
+
+export function focusNodes(ctx: CameraContext, nodes: string[], focused: string | null) {
+  ctx.setFocusedNode(focused);
+  const state = computeFocusState(ctx, nodes);
+  if (!state) return;
   void ctx.renderer
     .getCamera()
-    .animate(
-      focusGraphBounds(
-        ctx,
-        bounds.minX,
-        bounds.maxX,
-        bounds.minY,
-        bounds.maxY,
-        nodes.length === 1 ? radiusOneMinimumSpan(ctx) : undefined,
-      ),
-      { duration: ctx.settings.camera.animationDurationMs },
-    );
+    .animate(state, { duration: ctx.settings.camera.animationDurationMs });
+}
+
+export function fitVisibleNodesImmediate(ctx: CameraContext) {
+  const state = computeFocusState(ctx, ctx.graph.nodes());
+  if (!state) return;
+  ctx.renderer.getCamera().setState(state);
 }
 
 export function focusPrimaryNeighborhood(ctx: CameraContext, node: string) {

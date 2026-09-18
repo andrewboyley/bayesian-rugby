@@ -7,7 +7,7 @@
 	import { defaultForceAtlas2Settings, ForceAtlas2Layout, type ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
 	import { createGraphModel, type GraphDataset } from '#lib/graph/graph-model.ts';
 	import { GraphProjection } from '#lib/graph/graph-projection.ts';
-	import { focusPrimaryNeighborhood, fitVisibleNodes, centerEmptyGraph } from '#lib/graph/graph-camera.ts';
+	import { focusPrimaryNeighborhood, fitVisibleNodesImmediate, centerEmptyGraph } from '#lib/graph/graph-camera.ts';
 	import { patchLabelGridQuery } from '#lib/graph/label-grid.ts';
 	import type Sigma from 'sigma';
 	import { defaultGraphSettings, mergeSettings, type GraphSettings } from '#lib/config/graph-settings.ts';
@@ -29,6 +29,8 @@
 		primaryEdges: string[];
 		selectedEdges: string[];
 		focusedNode: string | null;
+		autoFit: boolean;
+		fitCount: number;
 		camera: { x: number; y: number; ratio: number };
 	}
 
@@ -38,6 +40,8 @@
 		doubleClickNode: (node: string) => void;
 		clickStage: () => void;
 		snapshot: () => SelectionSnapshot;
+		setAutoFit: (value: boolean) => void;
+		resetFitCount: () => void;
 		setCamera: (state: { x: number; y: number; ratio: number }) => void;
 		nodePosition: (node: string) => { x: number; y: number };
 		displayedLabels: () => string[];
@@ -50,6 +54,8 @@
 		visibleEdges: number;
 		layoutRunning: boolean;
 		layoutActiveNodes: number;
+		autoFit: boolean;
+		fitCount: number;
 		camera: { x: number; y: number; ratio: number };
 	}
 
@@ -64,6 +70,8 @@
 		firstTwoNodeClearance: () => number;
 		nodeViewports: () => { rawX: number; rawY: number; size: number; px: number; py: number }[];
 		stopLayout: () => void;
+		setAutoFit: (value: boolean) => void;
+		resetFitCount: () => void;
 		setCamera: (state: { x: number; y: number; ratio: number }) => void;
 		addNode: () => void;
 		snapshot: () => ProjectionSnapshot;
@@ -77,12 +85,14 @@
 	let loaded = $state(false);
 	let nodeCount = $state(0);
 	let edgeCount = $state(0);
+	let autoFit = $state(true);
 	let hasMoreNodes = $state(false);
 	let addNode = $state<(() => void) | undefined>(undefined);
 	let repeatingNodes = $state(false);
 	let nodesPerSecond = $state(defaultGraphSettings.layout.nodesPerSecond);
 	let toggleRepeatingNodes = $state<(() => void) | undefined>(undefined);
 	let setNodesPerSecond = $state<((value: number) => void) | undefined>(undefined);
+	let handleAutoFitToggle = $state<(checked: boolean) => void>(() => {});
 	let graphSettings = $state<GraphSettings>(defaultGraphSettings);
 	function updateGraphSettings(partial: Partial<GraphSettings>) {
 		if (partial.layout?.nodesPerSecond) nodesPerSecond = partial.layout.nodesPerSecond;
@@ -414,14 +424,62 @@
 				projection.rescaleVisibleSizes();
 			});
 		}
+		let autoFitFrame: number | undefined;
+		let autoFitDirty = false;
+		let autoFitSuspended = true;
+		let fitCount = 0;
+		let isAutoFitCameraUpdate = false;
+
+		function immediateAutoFit() {
+			isAutoFitCameraUpdate = true;
+			fitVisibleNodesImmediate(cameraCtx);
+			isAutoFitCameraUpdate = false;
+		}
+
+		function autoFitTick() {
+			autoFitFrame = undefined;
+			if (!autoFit || !autoFitDirty) {
+				autoFitSuspended = true;
+				return;
+			}
+			autoFitDirty = false;
+			immediateAutoFit();
+			fitCount += 1;
+			autoFitFrame = requestAnimationFrame(autoFitTick);
+		}
+
+		function wakeAutoFit(hintsAttributes?: (string | number)[]) {
+			if (!autoFit) return;
+			if (graph.order === 0) return;
+			if (hintsAttributes && !hintsAttributes.some((attribute) => attribute === 'x' || attribute === 'y')) return;
+			autoFitDirty = true;
+			if (autoFitSuspended) {
+				autoFitSuspended = false;
+				autoFitFrame = requestAnimationFrame(autoFitTick);
+			}
+		}
+
+		graph.on('nodeAdded', () => wakeAutoFit());
+		graph.on('nodeDropped', () => wakeAutoFit());
+		graph.on('edgeAdded', () => wakeAutoFit());
+		graph.on('edgeDropped', () => wakeAutoFit());
+		graph.on('nodeAttributesUpdated', () => wakeAutoFit());
+		graph.on('edgeAttributesUpdated', () => wakeAutoFit());
+		graph.on('eachNodeAttributesUpdated', (payload: { hints?: { attributes?: (string | number)[] } }) => wakeAutoFit(payload.hints?.attributes));
+		graph.on('eachEdgeAttributesUpdated', (payload: { hints?: { attributes?: (string | number)[] } }) => wakeAutoFit(payload.hints?.attributes));
+
 		gridViewportToGraph = (coordinates) => {
 			return renderer.viewportToGraph(coordinates);
 		};
 		resizeGraph = () => {
 			renderer.resize();
 			scheduleGridRedraw();
+			wakeAutoFit();
 		};
-		renderer.getCamera().on('updated', scheduleGridRedraw);
+		renderer.getCamera().on('updated', () => {
+			if (!isAutoFitCameraUpdate && autoFit) autoFit = false;
+			scheduleGridRedraw();
+		});
 		scheduleGridRedraw();
 		const layout = new ForceAtlas2Layout(graph);
 		updateFa2Settings = (key, value) => {
@@ -547,6 +605,8 @@
 				visibleEdges: graph.size,
 				layoutRunning: layoutSnapshot.running,
 				layoutActiveNodes: layoutSnapshot.activeNodes,
+				autoFit,
+				fitCount,
 				camera: { x, y, ratio },
 			};
 		}
@@ -700,7 +760,7 @@
 				}
 			});
 
-			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode, camera: { x, y, ratio } };
+			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode, autoFit, fitCount, camera: { x, y, ratio } };
 		}
 
 		function selectionCandidates() {
@@ -723,7 +783,10 @@
 			if (!primaryNode) updateGraphState(null);
 		});
 
-	renderer.on('clickNode', ({ node }) => handleNodeClick(node));
+	renderer.on('clickNode', ({ node }) => {
+			autoFit = false;
+			handleNodeClick(node);
+		});
 		renderer.on('doubleClickNode', ({ node, event }) => {
 			event.preventSigmaDefault();
 			focusPrimaryNeighborhood(cameraCtx, node);
@@ -737,8 +800,15 @@
 		});
 		renderer.on('doubleClickStage', ({ event }) => {
 			event.preventSigmaDefault();
-			if (projection.visibleCount() === 0) centerEmptyGraph(cameraCtx);
-			else fitVisibleNodes(cameraCtx);
+			autoFit = true;
+			if (projection.visibleCount() === 0) {
+				isAutoFitCameraUpdate = true;
+				centerEmptyGraph(cameraCtx, false);
+				isAutoFitCameraUpdate = false;
+			} else {
+				immediateAutoFit();
+			}
+			wakeAutoFit();
 		});
 
 		if (hasDiagnostic('timers')) {
@@ -767,6 +837,8 @@
 				doubleClickNode: (node) => focusPrimaryNeighborhood(cameraCtx, node),
 				clickStage: clearSelection,
 				snapshot: selectionSnapshot,
+				setAutoFit: (value) => { autoFit = value; if (value) wakeAutoFit(); },
+				resetFitCount: () => { fitCount = 0; },
 				setCamera: (state) => renderer.getCamera().setState(state),
 				nodePosition: (node) => {
 					const { x, y } = graph.getNodeAttributes(node);
@@ -818,6 +890,8 @@
 					(secondNode.size as number)
 				);
 			},
+			setAutoFit: (value) => { autoFit = value; if (value) wakeAutoFit(); },
+			resetFitCount: () => { fitCount = 0; },
 			setCamera: (state) => renderer.getCamera().setState(state),
 			stopLayout: () => layout.stop(),
 			nodeViewports: () =>
@@ -836,10 +910,16 @@
 				lastTrace: () => revealTrace,
 			};
 		}
+		isAutoFitCameraUpdate = true;
 		centerEmptyGraph(cameraCtx, false);
+		isAutoFitCameraUpdate = false;
 		addNode = addNextNodeByDegree;
 		toggleRepeatingNodes = () => (repeatingNodes ? stopRepeatingNodes() : startRepeatingNodes());
 		setNodesPerSecond = updateNodesPerSecond;
+		handleAutoFitToggle = (checked) => {
+			autoFit = checked;
+			if (checked) wakeAutoFit();
+		};
 		destroyRenderer = () => {
 			resizeGraph = undefined;
 				addNode = undefined;
@@ -851,6 +931,7 @@
 			for (const frame of popFrames) cancelAnimationFrame(frame);
 			if (gridFrame !== undefined) cancelAnimationFrame(gridFrame);
 			if (sizeFrame !== undefined) cancelAnimationFrame(sizeFrame);
+			if (autoFitFrame !== undefined) cancelAnimationFrame(autoFitFrame);
 			layout.destroy();
 			delete performanceWindow.rugbyGraphSelectionTest;
 			delete performanceWindow.rugbyGraphProjectionTest;
@@ -860,6 +941,7 @@
 		hasMoreNodes = model.nodesByDescendingDegree.length > 0;
 		loaded = true;
 		status = 'ready';
+		wakeAutoFit();
 		performance.mark('rugby-graph:graph-ready');
 	});
 
@@ -889,6 +971,10 @@
 				{/if}
 		</div>
 		<footer class:hidden={!graphOpen} class="flex items-center gap-lg border-t border-hairline px-sm py-xs text-caption sm:px-md">
+			<label for="auto-fit-toggle" class="flex min-h-6 items-center gap-sm text-caption text-body">
+				<input id="auto-fit-toggle" class="size-4 accent-ink" type="checkbox" checked={autoFit} onchange={(event) => handleAutoFitToggle(event.currentTarget.checked)} />
+				<span>auto fit</span>
+			</label>
 			<span class="font-normal tabular-nums text-mute">nodes {nodeCount} · edges {edgeCount}</span>
 		</footer>
 	</WorkspacePanel>
