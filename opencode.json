@@ -2,8 +2,8 @@
   "$schema": "https://opencode.ai/config.json",
   "permissions": [
     {
-      "action": "chrome-devtools_take_screenshot",
-      "resource": "*",
+      "action": "shell",
+      "resource": "agent-browser screenshot *",
       "effect": "deny"
     }
   ]

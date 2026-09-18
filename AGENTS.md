@@ -66,33 +66,38 @@ If you change `justfile`, run `just format-check`. If you change `DESIGN.md`, ru
 
 Use Playwright for browser behavior and performance tests. Add focused tests when you add testable behavior.
 
-## Chrome DevTools Interaction
+## agent-browser Interaction
 
-The chrome-devtools tools drive the app through the browser. Use them for manual checks. Use Playwright for repeatable checks.
+agent-browser drives the app through the browser for manual checks. Use Playwright for repeatable checks. Start a named session, then open the app:
 
-Before an interaction, take a snapshot. The snapshot lists element uids. Uids change when the page updates. Take a fresh snapshot before each action. An old uid fails.
+```sh
+export AGENT_BROWSER_SESSION="$(agent-browser session id --scope worktree --prefix rugby)"
+agent-browser open http://localhost:5173/
+```
 
-Set `verbose` to true in the snapshot. The graph canvas appears only in the verbose snapshot.
+Run `agent-browser snapshot` before an interaction. The snapshot lists element refs such as `@e3`. The refs change when the page updates. Take a fresh snapshot after navigation or after any page change. An old ref fails.
+
+Run `agent-browser snapshot -i` to list interactive elements only. The graph canvas appears in the full snapshot, but it has no ref. The canvas captures input through the `.sigma-mouse` overlay. Click, double-click, hover, and drag the overlay, not the canvas element.
 
 These interactions are proven:
 
-1. Click an element with its uid. A single click on empty canvas clears the node selection.
-2. Double-click an element with `dblClick` set to true. A double-click on the canvas fits all visible nodes.
-3. Pan the view with the drag action. Drag from the canvas uid to any element uid. The view follows the drag.
-4. Hover an element with its uid. The pointer moves to the element center.
-5. Zoom through a double-click, because the tools have no wheel action. Or call `setCamera` through script evaluation.
+1. Click an element with its ref. A single click on empty canvas clears the node selection.
+2. Double-click the canvas with `agent-browser dblclick .sigma-mouse`. A double-click on the canvas fits all visible nodes.
+3. Pan the view with a drag, for example `agent-browser drag .sigma-mouse @e26`. Use a ref from the current snapshot as the target. The view follows the drag.
+4. Hover an element with its ref. The pointer moves to the element center.
+5. Zoom through a double-click, because agent-browser has no wheel action. Or call `setCamera` through `agent-browser eval`.
 
-The canvas is one element in the snapshot. You cannot click a node by uid. Call `window.rugbyGraphSelectionTest.clickNode('name')` or `.doubleClickNode('name')` through script evaluation instead.
+You cannot click a node by ref. Call `window.rugbyGraphSelectionTest.clickNode('name')` or `.doubleClickNode('name')` through `agent-browser eval` instead.
 
-Read state through script evaluation. Call `snapshot()` on the controller for `primaryNode`, `activeNodes`, and `camera`. Do not read the on-screen "nodes N · edges N" text. It is stale.
+Read state through `agent-browser eval`. Call `snapshot()` on the controller for `primaryNode`, `activeNodes`, and `camera`. The camera animates after a click. Wait for it to settle before you read the camera. Do not read the on-screen "nodes N · edges N" text. It is stale.
 
-Do not dispatch synthetic DOM events, for example `el.dispatchEvent(new MouseEvent(...))`. Sigma ignores them because they are not trusted. Use the chrome-devtools tools or the controller instead.
+Do not dispatch synthetic DOM events, for example `el.dispatchEvent(new MouseEvent(...))`. Sigma ignores them because they are not trusted. Use agent-browser or the controller instead.
 
 ## Performance Audits
 
 Run `just performance` before you finish a graph rendering change. It records whether its headless Chromium runner supports a WebGL GPU timer query.
 
-For a GPU performance conclusion, use Chrome DevTools. Open `/?perf=timers`, then run a WebGL2 elapsed-time query through page script evaluation. Do not compare GPU times between different browsers, GPUs, viewports, or graph states.
+For a GPU performance conclusion, use agent-browser. Open `/?perf=timers`, then run a WebGL2 elapsed-time query through `agent-browser eval`. Do not compare GPU times between different browsers, GPUs, viewports, or graph states.
 
 ## Delivery Rules
 
@@ -100,4 +105,4 @@ Do not change the package manager or dependency versions without a task that req
 
 Do not commit secrets or `.env` files. The current adapter is `@sveltejs/adapter-auto`; select a deployment adapter only when the deployment target is known.
 
-Only run playwright tests after you have confirmed that that the change is verified in the chrome devtools browser or there is an error. DO NOT RUN ANY PLAYWRIGHT TESTS IF YOU HAVEN'T VERIFIED THE CHANGE WITH CHROME DEVTOOLS
+Only run playwright tests after you have made sure the change works with agent-browser, or when an error appears. DO NOT RUN ANY PLAYWRIGHT TESTS UNLESS YOU HAVE MADE SURE THE CHANGE WORKS WITH AGENT-BROWSER
