@@ -69,6 +69,8 @@
 		max?: number;
 		step?: number;
 		tooltip: string;
+		// Renderer and test internals stay in the settings model but leave the end-user panel.
+		hidden?: boolean;
 	}
 
 	const settingsSections: { id: DomainKey; label: string; fields: SettingField[] }[] = [
@@ -91,21 +93,21 @@
 			id: 'rendering',
 			label: 'rendering',
 			fields: [
-				{ key: 'rendering.edgeOpacity', label: 'edge', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Base opacity for edges in the active neighborhood.' },
-				{ key: 'rendering.edgeOpacityOpaque', label: 'edge opaque', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity for fully opaque edges (selected or emphasized connections).' },
+				{ key: 'rendering.edgeOpacity', label: 'edge', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of edges when nothing is selected or hovered (the idle view).' },
+				{ key: 'rendering.edgeOpacityOpaque', label: 'edge opaque', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of focused edges — the selected pair edge, or the edges touching a single selected or hovered node. Select or hover a node to see it.' },
 				{ key: 'rendering.edgeInactiveOpacity', label: 'edge inactive', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of edges not connected to the active selection or hover neighborhood.' },
 				{ key: 'rendering.nodeInactiveOpacity', label: 'node inactive', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of nodes not in the active selection or hover neighborhood.' },
-				{ key: 'rendering.nodeActiveOpacity', label: 'node active', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of nodes in the active selection or direct neighbors of hovered node.' },
-				{ key: 'rendering.nodePairInactiveOpacity', label: 'node pair', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity for nodes in the inactive pair state during selection interactions.' },
-				{ key: 'rendering.edgePairInactiveOpacity', label: 'edge pair', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity for edges not in the selected pair when a primary/secondary pair exists.' },
+				{ key: 'rendering.nodeActiveOpacity', label: 'node active', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of active neighbor nodes when a single node is selected (no pair selected).' },
+				{ key: 'rendering.nodePairInactiveOpacity', label: 'node pair', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of neighbor nodes when a primary/secondary pair is selected (excluding the two pair nodes).' },
+				{ key: 'rendering.edgePairInactiveOpacity', label: 'edge pair', type: 'range', min: 0, max: 1, step: 0.05, tooltip: 'Opacity of edges from the primary node that are not the selected pair edge (all other edges use edge inactive).' },
 				{ key: 'rendering.labelFontSize', label: 'label font', type: 'range', min: 8, max: 24, step: 1, tooltip: 'Font size in pixels for node labels.' },
 				{ key: 'rendering.labelBackgroundPadding', label: 'label pad', type: 'range', min: 0, max: 12, step: 1, tooltip: 'Padding around label text inside the label backdrop box.' },
 				{ key: 'rendering.backdropPadding', label: 'backdrop pad', type: 'range', min: 0, max: 20, step: 1, tooltip: 'Padding around the entire label backdrop (text + background).' },
 				{ key: 'rendering.backdropCornerRadius', label: 'backdrop radius', type: 'range', min: 0, max: 12, step: 1, tooltip: 'Corner radius in pixels for the label backdrop rectangle.' },
 				{ key: 'rendering.backdropBorderWidth', label: 'backdrop border', type: 'range', min: 0, max: 4, step: 1, tooltip: 'Border width in pixels for the label backdrop.' },
 				{ key: 'rendering.backdropShadowBlur', label: 'backdrop blur', type: 'range', min: 0, max: 20, step: 1, tooltip: 'Shadow blur radius for the label backdrop (0 = no shadow).' },
-				{ key: 'rendering.pickingDownSizingRatioCoarse', label: 'coarse picking', type: 'range', min: 1, max: 8, step: 1, tooltip: 'Downsampling ratio for coarse picking pass (lower = more precise, slower).' },
-				{ key: 'rendering.pickingDownSizingRatioNormal', label: 'normal picking', type: 'range', min: 1, max: 8, step: 1, tooltip: 'Downsampling ratio for normal picking pass (lower = more precise, slower).' },
+				{ key: 'rendering.pickingDownSizingRatioCoarse', label: 'coarse picking', type: 'range', min: 1, max: 8, step: 1, tooltip: 'Downsampling ratio for coarse picking pass (lower = more precise, slower).', hidden: true },
+				{ key: 'rendering.pickingDownSizingRatioNormal', label: 'normal picking', type: 'range', min: 1, max: 8, step: 1, tooltip: 'Downsampling ratio for normal picking pass (lower = more precise, slower).', hidden: true },
 			],
 		},
 		{
@@ -113,7 +115,7 @@
 			label: 'layout',
 			fields: [
 				{ key: 'layout.popAnimationDurationMs', label: 'pop duration', type: 'range', min: 50, max: 500, step: 10, tooltip: 'Animation duration in ms when new nodes pop into view.' },
-				{ key: 'layout.goldenAngle', label: 'golden angle', type: 'display', tooltip: 'Golden angle constant (≈137.5°) used for spiral node placement.' },
+				{ key: 'layout.goldenAngle', label: 'golden angle', type: 'display', tooltip: 'Golden angle constant (≈137.5°) used for spiral node placement.', hidden: true },
 				{ key: 'layout.initialPositionOffset', label: 'initial offset', type: 'range', min: 0, max: 0.01, step: 0.001, tooltip: 'Initial random offset applied to new node positions to prevent overlap.' },
 				{ key: 'layout.revealInitialScale', label: 'reveal scale', type: 'range', min: 0.005, max: 0.1, step: 0.005, tooltip: 'Initial scale factor for newly revealed nodes (animates from this to 1).' },
 				{ key: 'layout.revealBatchSize', label: 'reveal batch', type: 'range', min: 4, max: 64, step: 4, tooltip: 'Number of nodes revealed per animation batch.' },
@@ -281,7 +283,7 @@
 				{#each settingsSections as section}
 					<CollapsibleSection id={section.id} title={section.label}>
 						<div class="grid gap-sm p-sm">
-							{#each section.fields as field}
+							{#each section.fields.filter((field) => !field.hidden) as field}
 								{@const value = resolveValue(graphSettings, field.key)}
 								<Tooltip content={field.tooltip}>
 									{#snippet children({ describedBy })}

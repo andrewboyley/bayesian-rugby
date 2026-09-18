@@ -41,6 +41,8 @@
 		setCamera: (state: { x: number; y: number; ratio: number }) => void;
 		nodePosition: (node: string) => { x: number; y: number };
 		displayedLabels: () => string[];
+		edgeDisplayData: (edge: string) => { opacity?: number; color?: string } | undefined;
+		nodeDisplayData: (node: string) => { opacity?: number } | undefined;
 	}
 
 	interface ProjectionSnapshot {
@@ -152,6 +154,7 @@
 			nodeActiveOpacity: number;
 			nodePairInactiveOpacity: number;
 			edgeOpacity: number;
+			edgeOpacityOpaque: number;
 			edgeInactiveOpacity: number;
 			edgePairInactiveOpacity: number;
 			labelFontSize: number;
@@ -219,6 +222,7 @@
 					nodeActiveOpacity: 0.3,
 					nodePairInactiveOpacity: 0.12,
 					edgeOpacity: 0.3,
+					edgeOpacityOpaque: 1,
 					edgeInactiveOpacity: 0.05,
 					edgePairInactiveOpacity: 0.05,
 					labelFontSize: 12,
@@ -265,10 +269,10 @@
 						label: { attribute: 'label' },
 						labelColor: '#fdfcfc',
 						labelFont: 'Berkeley Mono, JetBrains Mono, IBM Plex Mono, ui-monospace, monospace',
-						labelSize: { attribute: 'labelFontSize' },
+						labelSize: (_, __, graphState: any) => graphState.labelFontSize,
 						labelPosition: 'right',
 						labelBackgroundColor: '#201d1d',
-						labelBackgroundPadding: { attribute: 'labelBackgroundPadding' },
+						labelBackgroundPadding: (_, __, graphState: any) => graphState.labelBackgroundPadding,
 						labelDepth: 'topNodes',
 						labelVisibility: 'hidden',
 						labelCursor: 'pointer',
@@ -302,14 +306,14 @@
 							backdropVisibility: 'visible',
 							labelVisibility: 'visible',
 							backdropColor: '#201d1d',
-							backdropPadding: { attribute: 'backdropPadding' },
-							backdropCornerRadius: { attribute: 'backdropCornerRadius' },
+							backdropPadding: (_, __, graphState: any) => graphState.backdropPadding,
+							backdropCornerRadius: (_, __, graphState: any) => graphState.backdropCornerRadius,
 							backdropBorderColor: {
 								attribute: 'color',
 							},
-							backdropBorderWidth: { attribute: 'backdropBorderWidth' },
+							backdropBorderWidth: (_, __, graphState: any) => graphState.backdropBorderWidth,
 							backdropShadowColor: 'transparent',
-							backdropShadowBlur: { attribute: 'backdropShadowBlur' },
+							backdropShadowBlur: (_, __, graphState: any) => graphState.backdropShadowBlur,
 							backdropArea: 'both',
 						},
 					},
@@ -319,12 +323,12 @@
 							backdropVisibility: 'visible',
 							labelVisibility: 'visible',
 							backdropColor: '#201d1d',
-							backdropPadding: { attribute: 'backdropPadding' },
-							backdropCornerRadius: { attribute: 'backdropCornerRadius' },
+							backdropPadding: (_, __, graphState: any) => graphState.backdropPadding,
+							backdropCornerRadius: (_, __, graphState: any) => graphState.backdropCornerRadius,
 							backdropBorderColor: { attribute: 'color' },
-							backdropBorderWidth: { attribute: 'backdropBorderWidth' },
+							backdropBorderWidth: (_, __, graphState: any) => graphState.backdropBorderWidth,
 							backdropShadowColor: 'transparent',
-							backdropShadowBlur: { attribute: 'backdropShadowBlur' },
+							backdropShadowBlur: (_, __, graphState: any) => graphState.backdropShadowBlur,
 							backdropArea: 'both',
 						},
 					},
@@ -368,12 +372,12 @@
 					{
 						// @ts-ignore - custom edge state types
 						whenState: 'isActive',
-						then: { opacity: 1, depth: 'activeEdges' },
+						then: { opacity: (_, __, graphState: any) => graphState.edgeOpacityOpaque, depth: 'activeEdges' },
 					},
 					{
 						// @ts-ignore - custom edge state types
 						whenState: 'isSelected',
-						then: { opacity: 1, depth: 'activeEdges' },
+						then: { opacity: (_, __, graphState: any) => graphState.edgeOpacityOpaque, depth: 'activeEdges' },
 					},
 					{
 						// @ts-ignore - custom edge state types
@@ -475,6 +479,7 @@
 				nodeActiveOpacity: r.nodeActiveOpacity,
 				nodePairInactiveOpacity: r.nodePairInactiveOpacity,
 				edgeOpacity: r.edgeOpacity,
+				edgeOpacityOpaque: r.edgeOpacityOpaque,
 				edgeInactiveOpacity: r.edgeInactiveOpacity,
 				edgePairInactiveOpacity: r.edgePairInactiveOpacity,
 				labelFontSize: r.labelFontSize,
@@ -767,8 +772,9 @@
 					const { x, y } = graph.getNodeAttributes(node);
 					return renderer.getNormalizationFunction()({ x: x as number, y: y as number });
 				},
-				
 				displayedLabels: () => [...renderer.getNodeDisplayedLabels()],
+				edgeDisplayData: (edge) => renderer.getEdgeDisplayData(edge),
+				nodeDisplayData: (node) => renderer.getNodeDisplayData(node),
 			};
 		}
 		if (searchParameters.get('test') === 'projection') {

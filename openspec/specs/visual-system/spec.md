@@ -41,4 +41,4 @@ The system SHALL render the home page as the DESIGN.md app shell. The shell is b
 
 #### Scenario: Dark surface stays on the graph panel
 - **WHEN** the browser paints the home page
-- **THEN** the dark `surface-dark` color appears only in the graph viewer area
+- **THEN** the dark graph surface appears only in the graph viewer area, and controls and tooltips may use dark colors outside it

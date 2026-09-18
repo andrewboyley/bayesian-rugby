@@ -57,7 +57,11 @@ test("OpenSpec visual-system: app shell resolves canvas, mono, and graph-panel t
       graphSurface: getComputedStyle(graphSurface).backgroundColor,
       mutedText: getComputedStyle(headerStatus).color,
       darkSurfacesStayInViewer: Array.from(document.querySelectorAll<HTMLElement>("*"))
-        .filter((element) => getComputedStyle(element).backgroundColor === "rgb(32, 29, 29)")
+        .filter(
+          (element) =>
+            getComputedStyle(element).backgroundColor === "rgb(32, 29, 29)" &&
+            !element.matches("button, a, input, select, textarea, [role='tooltip']"),
+        )
         .every((element) => viewer.contains(element)),
     };
   });
