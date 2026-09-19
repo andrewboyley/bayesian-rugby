@@ -1,13 +1,18 @@
 <script lang="ts">
 	import { onDestroy, onMount } from 'svelte';
 	import GraphGrid from '#lib/components/GraphGrid.svelte';
+	import SelectionRings, { RING_RADIUS_FACTORS, type RingState } from '#lib/components/SelectionRings.svelte';
 	import GraphViewerControls from '#lib/components/GraphViewerControls.svelte';
 	import PanelBar from '#lib/components/PanelBar.svelte';
 	import WorkspacePanel from '#lib/components/WorkspacePanel.svelte';
 	import { defaultForceAtlas2Settings, ForceAtlas2Layout, type ForceAtlas2Settings } from '#lib/graph/force-atlas2-layout.ts';
 	import { createGraphModel, type GraphDataset } from '#lib/graph/graph-model.ts';
 	import { GraphProjection } from '#lib/graph/graph-projection.ts';
-	import { focusPrimaryNeighborhood, fitVisibleNodesImmediate, centerEmptyGraph } from '#lib/graph/graph-camera.ts';
+	import {
+  focusPrimaryNeighborhood,
+  fitNodes,
+  centerEmptyGraph,
+} from '#lib/graph/graph-camera.ts';
 	import { patchLabelGridQuery } from '#lib/graph/label-grid.ts';
 	import type Sigma from 'sigma';
 	import { defaultGraphSettings, mergeSettings, type GraphSettings } from '#lib/config/graph-settings.ts';
@@ -31,6 +36,7 @@
 		focusedNode: string | null;
 		autoFit: boolean;
 		fitCount: number;
+		rings: { visible: boolean; color: string | null };
 		camera: { x: number; y: number; ratio: number };
 	}
 
@@ -108,6 +114,9 @@
 	let updateRenderingStylesCallback: (() => void) | undefined;
 	let primaryNode = $state<string | null>(null);
 	let secondaryNode = $state<string | null>(null);
+	let ringsRevision = $state(0);
+	let ringStateReader = $state<(() => RingState | null) | null>(null);
+	const noRingsState = () => null;
 	let graphOpen = $state(true);
 	let controlsOpen = $state(true);
 	let resizeGraph = $state<(() => void) | undefined>(undefined);
@@ -140,7 +149,10 @@
 		const searchParameters = new URLSearchParams(window.location.search);
 		const performanceProfile = searchParameters.get('performance') ?? 'baseline';
 		const edgeOpacity = performanceProfile === 'opaque' ? defaultGraphSettings.rendering.edgeOpacityOpaque : defaultGraphSettings.rendering.edgeOpacity;
-		const edgeColor = performanceProfile === 'opaque' ? '#424245' : '#646262';
+		// Idle colour for edges and inactive nodes. In the normal view it matches
+		// the cream canvas (#fdfcfc), so idle edges and inactive nodes blend into
+		// the background. The 'opaque' profile keeps a visible colour.
+		const idleColor = performanceProfile === 'opaque' ? '#424245' : '#fdfcfc';
 		const antialiasEdges = performanceProfile !== 'aliased';
 		const enableEdgeEvents = performanceProfile === 'edge-events';
 		const pickingDownSizingRatio = performanceProfile === 'coarse-picking' ? defaultGraphSettings.rendering.pickingDownSizingRatioCoarse : defaultGraphSettings.rendering.pickingDownSizingRatioNormal;
@@ -255,13 +267,13 @@
 				},
 				edges: {
 					variables: {
-						sourceColor: { type: 'color', default: edgeColor },
-						targetColor: { type: 'color', default: edgeColor },
+						sourceColor: { type: 'color', default: idleColor },
+						targetColor: { type: 'color', default: idleColor },
 						useGradient: { type: 'boolean', default: false },
 					},
 					paths: [pathLine()],
 					layers: [
-						layerPlain({ color: edgeColor }),
+						layerPlain({ color: idleColor }),
 						layerGradient({
 							stops: [{ attribute: 'sourceColor' }, { attribute: 'targetColor' }],
 							enabled: { attribute: 'useGradient' },
@@ -290,7 +302,7 @@
 					{
 						// @ts-ignore - custom node state types
 						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean }, graphState: any) => graphState.hasActiveSubgraph && !state.isActive && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: (_, __, graphState: any) => graphState.nodeInactiveOpacity },
+						then: { color: idleColor, label: '', opacity: (_, __, graphState: any) => graphState.nodeInactiveOpacity },
 					},
 					{
 						// @ts-ignore - custom node state types
@@ -302,7 +314,7 @@
 						// @ts-ignore - custom node state types
 						when: (_attrs: unknown, state: { isActive: boolean; isHovered: boolean; isLabelHovered: boolean; isPrimary: boolean; isSecondary: boolean }, graphState: any) =>
 							graphState.hasSelectedPair && state.isActive && !state.isPrimary && !state.isSecondary && !state.isHovered && !state.isLabelHovered,
-						then: { color: '#424245', label: '', opacity: (_, ___, graphState: any) => graphState.nodePairInactiveOpacity },
+						then: { label: '', opacity: (_, ___, graphState: any) => graphState.nodePairInactiveOpacity },
 					},
 					{
 						// @ts-ignore - custom node state types
@@ -368,7 +380,7 @@
 				],
 				edges: [
 					DEPTHLESS_STYLES.edges,
-					{ color: edgeColor, opacity: (_, __, graphState: any) => graphState.edgeOpacity, size: 1, path: 'line' },
+					{ color: idleColor, opacity: (_, __, graphState: any) => graphState.edgeOpacity, size: 1, path: 'line' },
 					{
 						// @ts-ignore - custom edge state types
 						when: (_attrs: unknown, state: { isActive: boolean }, graphState: any) => graphState.hasActiveSubgraph && !state.isActive,
@@ -408,6 +420,27 @@
 			getFocusedNode: () => focusedNode,
 			setFocusedNode: (n: string | null) => { focusedNode = n; },
 		};
+		const readRingState = (): RingState | null => {
+			if (!primaryNode) return null;
+			const attributes = graph.getNodeAttributes(primaryNode);
+			const { x, y, size, color } = attributes;
+			if (typeof x !== 'number' || typeof y !== 'number' || typeof size !== 'number') return null;
+			const center = renderer.graphToViewport({ x, y });
+			const radiusPx = RING_RADIUS_FACTORS.map((factor) => {
+				const edge = renderer.graphToViewport({ x: x + size * factor, y });
+				return Math.abs(edge.x - center.x);
+			});
+			return { color: typeof color === 'string' ? color : '#fdfcfc', center, radiusPx };
+		};
+		ringStateReader = readRingState;
+		let ringsFrame: number | undefined;
+		function scheduleRingsSync() {
+			if (ringsFrame !== undefined) return;
+			ringsFrame = requestAnimationFrame(() => {
+				ringsFrame = undefined;
+				ringsRevision += 1;
+			});
+		}
 		let gridFrame: number | undefined;
 		let sizeFrame: number | undefined;
 		function scheduleGridRedraw() {
@@ -427,13 +460,32 @@
 		let autoFitFrame: number | undefined;
 		let autoFitDirty = false;
 		let autoFitSuspended = true;
+		let suppressAutoFit = false;
 		let fitCount = 0;
 		let isAutoFitCameraUpdate = false;
+		let autoFitAnimId = 0;
+		let stateUpdateFrame: number | undefined;
+
+		function autoFitTargetNodes(): string[] {
+			if (primaryNode) return [primaryNode, ...graph.neighbors(primaryNode)];
+			return graph.nodes();
+		}
 
 		function immediateAutoFit() {
+			// Animate the camera to the fitted state. Every animation frame emits
+			// a camera update; the flag suppresses those so they are not read as a
+			// manual pan or zoom. Only the newest animation may clear the flag,
+			// because the loop restarts the animation while nodes keep moving.
 			isAutoFitCameraUpdate = true;
-			fitVisibleNodesImmediate(cameraCtx);
-			isAutoFitCameraUpdate = false;
+			const id = ++autoFitAnimId;
+			const settled = fitNodes(cameraCtx, autoFitTargetNodes());
+			if (settled) {
+				void settled.then(() => {
+					if (id === autoFitAnimId) isAutoFitCameraUpdate = false;
+				});
+			} else {
+				isAutoFitCameraUpdate = false;
+			}
 		}
 
 		function autoFitTick() {
@@ -453,19 +505,23 @@
 			if (graph.order === 0) return;
 			if (hintsAttributes && !hintsAttributes.some((attribute) => attribute === 'x' || attribute === 'y')) return;
 			autoFitDirty = true;
+			// A manual gesture owns the camera until it ends: keep the dirty
+			// marker so the loop resumes where it left off, but do not re-arm a
+			// fit mid-gesture. The gesture's own camera updates uncheck auto fit.
+			if (suppressAutoFit) return;
 			if (autoFitSuspended) {
 				autoFitSuspended = false;
 				autoFitFrame = requestAnimationFrame(autoFitTick);
 			}
 		}
 
-		graph.on('nodeAdded', () => wakeAutoFit());
-		graph.on('nodeDropped', () => wakeAutoFit());
-		graph.on('edgeAdded', () => wakeAutoFit());
-		graph.on('edgeDropped', () => wakeAutoFit());
-		graph.on('nodeAttributesUpdated', () => wakeAutoFit());
+		graph.on('nodeAdded', () => { wakeAutoFit(); scheduleGraphStateUpdate(); });
+		graph.on('nodeDropped', () => { wakeAutoFit(); scheduleGraphStateUpdate(); });
+		graph.on('edgeAdded', () => { wakeAutoFit(); scheduleGraphStateUpdate(); });
+		graph.on('edgeDropped', () => { wakeAutoFit(); scheduleGraphStateUpdate(); });
+		graph.on('nodeAttributesUpdated', () => { wakeAutoFit(); scheduleRingsSync(); });
 		graph.on('edgeAttributesUpdated', () => wakeAutoFit());
-		graph.on('eachNodeAttributesUpdated', (payload: { hints?: { attributes?: (string | number)[] } }) => wakeAutoFit(payload.hints?.attributes));
+		graph.on('eachNodeAttributesUpdated', (payload: { hints?: { attributes?: (string | number)[] } }) => { wakeAutoFit(payload.hints?.attributes); scheduleRingsSync(); });
 		graph.on('eachEdgeAttributesUpdated', (payload: { hints?: { attributes?: (string | number)[] } }) => wakeAutoFit(payload.hints?.attributes));
 
 		gridViewportToGraph = (coordinates) => {
@@ -474,12 +530,67 @@
 		resizeGraph = () => {
 			renderer.resize();
 			scheduleGridRedraw();
+			scheduleRingsSync();
 			wakeAutoFit();
 		};
 		renderer.getCamera().on('updated', () => {
 			if (!isAutoFitCameraUpdate && autoFit) autoFit = false;
 			scheduleGridRedraw();
+			scheduleRingsSync();
 		});
+		// A manual gesture owns the camera: cancel any in-flight auto-fit
+		// animation and stop the loop from starting another fit, so the gesture
+		// is not fought. Cancelling alone never wins the race, because the loop
+		// restarts a fit on every frame while nodes keep moving.
+		const cancelFitOnGesture = () => {
+			if (isAutoFitCameraUpdate) renderer.getCamera().cancelAnimation();
+			autoFitDirty = false;
+			autoFitSuspended = true;
+		};
+		const cancelAutoFitOnPointerDown = () => {
+			// A drag owns the camera. Stop the loop here and keep it stopped for
+			// the whole gesture: graph events keep waking auto fit while nodes
+			// move, so suspending once is not enough. The first camera update
+			// caused by the drag unchecks auto fit. A click also starts with
+			// pointerdown but keeps auto fit on.
+			if (!autoFit) return;
+			suppressAutoFit = true;
+			cancelFitOnGesture();
+		};
+		const unsuppressAutoFit = () => {
+			// The gesture ended without unchecking auto fit (a click): resume
+			// the loop so the fit picks up the new selection. A pan or zoom has
+			// already unchecked auto fit, so nothing restarts here.
+			suppressAutoFit = false;
+			if (autoFit && autoFitDirty && autoFitSuspended) {
+				autoFitSuspended = false;
+				autoFitFrame = requestAnimationFrame(autoFitTick);
+			}
+		};
+		const cancelAutoFitOnWheel = () => {
+			// Wheel zoom is unambiguous, so disable auto fit immediately.
+			// Otherwise the loop keeps re-fitting and undoes the zoom. Sigma's
+			// own wheel handler stops propagation on the mouse layer, so this
+			// listener runs on the container in the capture phase, before the
+			// event reaches sigma.
+			if (!autoFit) return;
+			cancelFitOnGesture();
+			suppressAutoFit = false;
+			autoFit = false;
+		};
+		graphContainer.addEventListener('pointerdown', cancelAutoFitOnPointerDown);
+		graphContainer.addEventListener('pointerup', unsuppressAutoFit);
+		graphContainer.addEventListener('pointercancel', unsuppressAutoFit);
+		graphContainer.addEventListener('wheel', cancelAutoFitOnWheel, { capture: true, passive: true });
+
+		// A programmatic camera set is a manual gesture: stop auto fit from
+		// fighting it and turn the checkbox off, exactly like wheel zoom.
+		const applyManualCameraSet = (state: { x: number; y: number; ratio: number }) => {
+			cancelFitOnGesture();
+			suppressAutoFit = false;
+			autoFit = false;
+			renderer.getCamera().setState(state);
+		};
 		scheduleGridRedraw();
 		const layout = new ForceAtlas2Layout(graph);
 		updateFa2Settings = (key, value) => {
@@ -526,6 +637,19 @@
 			renderer.refresh();
 		}
 
+		function scheduleGraphStateUpdate() {
+			// Nodes and edges added after a selection (auto-add, reveal) carry no
+			// selection state and render dim. Re-run the state pass when the
+			// topology changes while a selection is active, once per frame so a
+			// reveal burst costs one pass instead of one per node.
+			if (primaryNode === null && secondaryNode === null) return;
+			if (stateUpdateFrame !== undefined) return;
+			stateUpdateFrame = requestAnimationFrame(() => {
+				stateUpdateFrame = undefined;
+				updateGraphState(null);
+			});
+		}
+
 		function updateRenderingStyles() {
 			const r = graphSettings.rendering;
 			const hasActiveSubgraph = !!primaryNode;
@@ -557,7 +681,15 @@
 			primaryNode = node;
 			secondaryNode = null;
 			updateGraphState(null);
-			focusPrimaryNeighborhood(cameraCtx, node);
+			if (autoFit) {
+				// Auto fit frames the visible active nodes (D4): keep the checkbox
+				// checked and let the loop fit the new neighborhood immediately.
+				focusedNode = node;
+				wakeAutoFit();
+			} else {
+				focusPrimaryNeighborhood(cameraCtx, node);
+			}
+			scheduleRingsSync();
 		}
 
 		function setGraphCursor(cursor: string) {
@@ -571,8 +703,10 @@
 					secondaryNode = null;
 				} else {
 					primaryNode = null;
+					if (autoFit) wakeAutoFit();
 				}
 				updateGraphState(null);
+				scheduleRingsSync();
 				return;
 			}
 
@@ -584,6 +718,7 @@
 			if (primaryNode && graph.areNeighbors(primaryNode, node)) {
 				secondaryNode = node;
 				updateGraphState(null);
+				scheduleRingsSync();
 				return;
 			}
 
@@ -595,6 +730,8 @@
 			secondaryNode = null;
 			focusedNode = null;
 			updateGraphState(null);
+			if (autoFit) wakeAutoFit();
+			scheduleRingsSync();
 		}
 
 		function projectionSnapshot(): ProjectionSnapshot {
@@ -760,7 +897,8 @@
 				}
 			});
 
-			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode, autoFit, fitCount, camera: { x, y, ratio } };
+			const rings = readRingState();
+			return { primaryNode, secondaryNode, activeNodes, primaryEdges, selectedEdges, focusedNode, autoFit, fitCount, rings: { visible: rings !== null, color: rings?.color ?? null }, camera: { x, y, ratio } };
 		}
 
 		function selectionCandidates() {
@@ -784,7 +922,6 @@
 		});
 
 	renderer.on('clickNode', ({ node }) => {
-			autoFit = false;
 			handleNodeClick(node);
 		});
 		renderer.on('doubleClickNode', ({ node, event }) => {
@@ -839,7 +976,8 @@
 				snapshot: selectionSnapshot,
 				setAutoFit: (value) => { autoFit = value; if (value) wakeAutoFit(); },
 				resetFitCount: () => { fitCount = 0; },
-				setCamera: (state) => renderer.getCamera().setState(state),
+				setCamera: applyManualCameraSet,
+				stopLayout: () => layout.stop(),
 				nodePosition: (node) => {
 					const { x, y } = graph.getNodeAttributes(node);
 					return renderer.getNormalizationFunction()({ x: x as number, y: y as number });
@@ -892,7 +1030,7 @@
 			},
 			setAutoFit: (value) => { autoFit = value; if (value) wakeAutoFit(); },
 			resetFitCount: () => { fitCount = 0; },
-			setCamera: (state) => renderer.getCamera().setState(state),
+			setCamera: applyManualCameraSet,
 			stopLayout: () => layout.stop(),
 			nodeViewports: () =>
 				graph.nodes().map((node) => {
@@ -927,11 +1065,18 @@
 				setNodesPerSecond = undefined;
 				stopRepeatingNodes();
 				revealRun += 1;
+			graphContainer.removeEventListener('pointerdown', cancelAutoFitOnPointerDown);
+			graphContainer.removeEventListener('pointerup', unsuppressAutoFit);
+			graphContainer.removeEventListener('pointercancel', unsuppressAutoFit);
+			graphContainer.removeEventListener('wheel', cancelAutoFitOnWheel, true);
 			if (revealTimer !== undefined) window.clearTimeout(revealTimer);
 			for (const frame of popFrames) cancelAnimationFrame(frame);
 			if (gridFrame !== undefined) cancelAnimationFrame(gridFrame);
 			if (sizeFrame !== undefined) cancelAnimationFrame(sizeFrame);
 			if (autoFitFrame !== undefined) cancelAnimationFrame(autoFitFrame);
+			if (stateUpdateFrame !== undefined) cancelAnimationFrame(stateUpdateFrame);
+			if (ringsFrame !== undefined) cancelAnimationFrame(ringsFrame);
+			ringStateReader = null;
 			layout.destroy();
 			delete performanceWindow.rugbyGraphSelectionTest;
 			delete performanceWindow.rugbyGraphProjectionTest;
@@ -961,7 +1106,9 @@
 		</PanelBar>
 		<div id="graph-viewer-panel" class:hidden={!graphOpen} class="relative flex min-h-0 flex-1 bg-surface-dark">
 				<GraphGrid viewportToGraph={gridViewportToGraph} revision={gridRevision} />
-				<div bind:this={container} class="relative z-10 min-h-0 flex-1"></div>
+				<div bind:this={container} class="relative z-10 min-h-0 flex-1">
+					<SelectionRings getRingState={ringStateReader ?? noRingsState} revision={ringsRevision} />
+				</div>
 				{#if !loaded}
 					<div class="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-xs p-md text-center" role="status" aria-live="polite">
 						<p class="m-0 font-medium text-on-primary">{status === 'dataset failed to load' ? '[ data unavailable ]' : '[ loading graph ]'}</p>

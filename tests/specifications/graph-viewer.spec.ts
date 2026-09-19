@@ -23,9 +23,27 @@ interface ProjectionTestController {
   snapshot: () => ProjectionSnapshot;
 }
 
+interface SelectionSnapshot extends ViewerSnapshot {
+  primaryNode: string | null;
+  secondaryNode: string | null;
+  activeNodes: string[];
+  focusedNode: string | null;
+}
+
+interface SelectionCandidates {
+  primary: string;
+  neighbor: string;
+  nonNeighbor: string;
+}
+
 interface SelectionTestController {
+  candidates: () => SelectionCandidates;
+  clickNode: (node: string) => void;
+  clickStage: () => void;
+  stopLayout: () => void;
   setAutoFit: (value: boolean) => void;
-  snapshot: () => ViewerSnapshot;
+  resetFitCount: () => void;
+  snapshot: () => SelectionSnapshot;
 }
 
 interface ViewerGlobals {
@@ -61,7 +79,7 @@ async function projectionSnapshot(
 async function selectionSnapshot(page: import("@playwright/test").Page) {
   return page.evaluate(
     () =>
-      (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.snapshot() as ViewerSnapshot,
+      (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.snapshot() as SelectionSnapshot,
   );
 }
 
@@ -98,6 +116,8 @@ test("OpenSpec auto-fit-view: the camera fits continuously while auto-fit is ena
   await expect
     .poll(async () => (await projectionSnapshot(page)).fitCount)
     .toBeGreaterThanOrEqual(1);
+  // Let the animated fit settle before measuring the camera.
+  await page.waitForTimeout(800);
   const singleFit = (await projectionSnapshot(page)).camera;
 
   await page.evaluate(() =>
@@ -106,6 +126,7 @@ test("OpenSpec auto-fit-view: the camera fits continuously while auto-fit is ena
   await expect
     .poll(async () => (await projectionSnapshot(page)).fitCount)
     .toBeGreaterThanOrEqual(2);
+  await page.waitForTimeout(800);
   const pairFit = (await projectionSnapshot(page)).camera;
 
   // Wider bounds force a new fit: the camera ratio reacts to the second node.
@@ -182,28 +203,72 @@ test("OpenSpec auto-fit-view: wheel zoom disables auto-fit and keeps the zoom", 
   expect((await projectionSnapshot(page)).camera).toEqual(settled.camera);
 });
 
-test("OpenSpec auto-fit-view: clicking a node disables auto-fit and keeps the camera", async ({
+test("OpenSpec auto-fit-active-nodes: clicking a node keeps auto-fit on and frames its neighborhood", async ({
   page,
 }) => {
-  await openProjectionHarness(page);
+  await openSelectionHarness(page);
   await page.evaluate(() => {
-    const viewer = (window as unknown as ViewerGlobals).rugbyGraphProjectionTest!;
-    viewer.showFirstNode();
-    viewer.stopLayout();
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.stopLayout();
   });
-  await expect.poll(async () => (await projectionSnapshot(page)).visibleNodes).toBe(1);
+  await expect.poll(async () => (await selectionSnapshot(page)).autoFit).toBe(true);
 
-  const viewerBox = await page.locator("#graph-viewer-panel").boundingBox();
-  expect(viewerBox).not.toBeNull();
-  const viewport = await page.evaluate(() =>
-    (window as unknown as ViewerGlobals).rugbyGraphProjectionTest!.firstNodeViewport(),
+  // Settle the whole-graph fit before measuring it. The auto-fit camera
+  // animation takes 600 ms, so wait past it.
+  await page.waitForTimeout(800);
+  const wholeFit = await selectionSnapshot(page);
+
+  const { primary } = await page.evaluate(() =>
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.candidates(),
   );
-  await page.mouse.click(viewerBox!.x + viewport.x, viewerBox!.y + viewport.y);
+  await page.evaluate((node) => {
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.clickNode(node);
+  }, primary);
+  await expect.poll(async () => (await selectionSnapshot(page)).primaryNode).toBe(primary);
+  await page.waitForTimeout(800);
 
-  await expect.poll(async () => (await projectionSnapshot(page)).autoFit).toBe(false);
-  const settled = await projectionSnapshot(page);
-  await page.waitForTimeout(400);
-  expect((await projectionSnapshot(page)).camera).toEqual(settled.camera);
+  const focused = await selectionSnapshot(page);
+  expect(focused.autoFit).toBe(true);
+  expect(focused.focusedNode).toBe(primary);
+  expect(focused.activeNodes[0]).toBe(primary);
+  // The neighborhood fits a smaller span, so it zooms in closer than the
+  // whole-graph fit. The layout is stopped, so positions cannot drift.
+  expect(focused.camera.ratio).toBeLessThan(wholeFit.camera.ratio);
+});
+
+test("OpenSpec auto-fit-active-nodes: clearing the selection refits all nodes", async ({
+  page,
+}) => {
+  await openSelectionHarness(page);
+  await page.evaluate(() => {
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.stopLayout();
+  });
+  await expect.poll(async () => (await selectionSnapshot(page)).autoFit).toBe(true);
+  await page.waitForTimeout(800);
+
+  const { primary } = await page.evaluate(() =>
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.candidates(),
+  );
+  await page.evaluate((node) => {
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.clickNode(node);
+  }, primary);
+  await expect.poll(async () => (await selectionSnapshot(page)).primaryNode).toBe(primary);
+  await page.waitForTimeout(800);
+  const neighborhoodFit = await selectionSnapshot(page);
+  expect(neighborhoodFit.autoFit).toBe(true);
+
+  // An empty-space click clears the selection and returns the fit to all
+  // nodes, which spans a larger area than the neighborhood.
+  await page.evaluate(() => {
+    (window as unknown as ViewerGlobals).rugbyGraphSelectionTest!.clickStage();
+  });
+  await expect.poll(async () => (await selectionSnapshot(page)).primaryNode).toBeNull();
+  await page.waitForTimeout(800);
+
+  const cleared = await selectionSnapshot(page);
+  expect(cleared.autoFit).toBe(true);
+  expect(cleared.primaryNode).toBeNull();
+  expect(cleared.focusedNode).toBeNull();
+  expect(cleared.camera.ratio).toBeGreaterThan(neighborhoodFit.camera.ratio);
 });
 
 test("OpenSpec auto-fit-view: double-clicking empty canvas enables auto-fit and refits", async ({
@@ -262,8 +327,8 @@ test("OpenSpec auto-fit-view: a stable graph does no bounds work or camera set",
   });
   await expect.poll(async () => (await projectionSnapshot(page)).visibleNodes).toBe(1);
   await expect.poll(async () => (await projectionSnapshot(page)).autoFit).toBe(true);
-  // Let the settle fit run and the loop suspend before counting.
-  await page.waitForTimeout(300);
+  // Let the settle fit run and animate to completion before counting.
+  await page.waitForTimeout(800);
   await page.evaluate(() =>
     (window as unknown as ViewerGlobals).rugbyGraphProjectionTest!.resetFitCount(),
   );

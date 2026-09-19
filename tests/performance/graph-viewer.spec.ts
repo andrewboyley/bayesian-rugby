@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { defaultGraphSettings } from "../../src/lib/config/graph-settings";
 
 interface PerformanceSnapshot {
   profile: string;
@@ -110,7 +111,7 @@ const scenarios = [
     name: "baseline",
     expected: {
       antialiasEdges: true,
-      edgeOpacity: 0.3,
+      edgeOpacity: defaultGraphSettings.rendering.edgeOpacity,
       enableEdgeEvents: false,
       pickingDownSizingRatio: 2,
     },
@@ -119,7 +120,7 @@ const scenarios = [
     name: "aliased",
     expected: {
       antialiasEdges: false,
-      edgeOpacity: 0.3,
+      edgeOpacity: defaultGraphSettings.rendering.edgeOpacity,
       enableEdgeEvents: false,
       pickingDownSizingRatio: 2,
     },
@@ -128,7 +129,7 @@ const scenarios = [
     name: "opaque",
     expected: {
       antialiasEdges: true,
-      edgeOpacity: 1,
+      edgeOpacity: defaultGraphSettings.rendering.edgeOpacityOpaque,
       enableEdgeEvents: false,
       pickingDownSizingRatio: 2,
     },
@@ -137,7 +138,7 @@ const scenarios = [
     name: "edge-events",
     expected: {
       antialiasEdges: true,
-      edgeOpacity: 0.3,
+      edgeOpacity: defaultGraphSettings.rendering.edgeOpacity,
       enableEdgeEvents: true,
       pickingDownSizingRatio: 2,
     },
@@ -146,7 +147,7 @@ const scenarios = [
     name: "coarse-picking",
     expected: {
       antialiasEdges: true,
-      edgeOpacity: 0.3,
+      edgeOpacity: defaultGraphSettings.rendering.edgeOpacity,
       enableEdgeEvents: false,
       pickingDownSizingRatio: 4,
     },

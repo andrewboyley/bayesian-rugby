@@ -94,10 +94,22 @@ export function focusNodes(ctx: CameraContext, nodes: string[], focused: string 
     .animate(state, { duration: ctx.settings.camera.animationDurationMs });
 }
 
-export function fitVisibleNodesImmediate(ctx: CameraContext) {
-  const state = computeFocusState(ctx, ctx.graph.nodes());
+export function fitNodes(ctx: CameraContext, nodes: string[]) {
+  const state = computeFocusState(ctx, nodes);
+  if (!state) return;
+  return ctx.renderer
+    .getCamera()
+    .animate(state, { duration: ctx.settings.camera.animationDurationMs });
+}
+
+export function fitNodesImmediate(ctx: CameraContext, nodes: string[]) {
+  const state = computeFocusState(ctx, nodes);
   if (!state) return;
   ctx.renderer.getCamera().setState(state);
+}
+
+export function fitVisibleNodesImmediate(ctx: CameraContext) {
+  fitNodesImmediate(ctx, ctx.graph.nodes());
 }
 
 export function focusPrimaryNeighborhood(ctx: CameraContext, node: string) {

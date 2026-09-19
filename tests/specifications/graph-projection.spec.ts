@@ -354,23 +354,32 @@ test("OpenSpec graph-projection: FA2 stays running and separates nodes while add
       const add = window.rugbyGraphProjectionTest!.addNode;
       for (let i = 0; i < 20; i++) add();
     });
-    await page.waitForTimeout(400);
     const state = await page.evaluate(() => {
       const views = window.rugbyGraphProjectionTest!.nodeViewports();
-      const distinct = new Set(
-        views.map((node) => `${node.rawX.toFixed(4)}|${node.rawY.toFixed(4)}`),
-      ).size;
-      const far = views.filter((node) => Math.hypot(node.rawX, node.rawY) > 4).length;
       return {
         total: views.length,
-        distinct,
-        far,
         layoutRunning: window.rugbyGraphProjectionTest!.snapshot().layoutRunning,
       };
     });
     expect(state.layoutRunning).toBe(true);
-    expect(state.distinct).toBe(state.total);
-    expect(state.far).toBeGreaterThanOrEqual(state.total / 2);
+    // Freshly added nodes start at the origin; the worker layout needs a
+    // moment to push them apart, so wait for separation instead of a fixed
+    // delay: every node reaches a distinct position and most leave the
+    // origin area.
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const views = window.rugbyGraphProjectionTest!.nodeViewports();
+            const distinct = new Set(
+              views.map((node) => `${node.rawX.toFixed(4)}|${node.rawY.toFixed(4)}`),
+            ).size;
+            const far = views.filter((node) => Math.hypot(node.rawX, node.rawY) > 4).length;
+            return distinct === views.length && far >= views.length / 2;
+          }),
+        { timeout: 5_000 },
+      )
+      .toBe(true);
   }
 });
 
